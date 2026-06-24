@@ -465,11 +465,10 @@ function convertHighlights(content: string): string {
 // === Step 7: Superscript / Subscript ===
 
 function convertSupSub(content: string): string {
-  // ^text^ → <sup>text</sup>
-  let result = content.replace(/\^([^^]+)\^/g, "<sup>$1</sup>");
-  // ~~text~~ → <sub>text</sub>
-  result = result.replace(/~~([^~]+)~~/g, "<sub>$1</sub>");
-  return result;
+  // ^text^ and ~text~ are passed through as-is; pandoc handles them via
+  // +superscript and +subscript extensions, which produce correct LaTeX
+  // (\textsuperscript / \textsubscript) instead of raw HTML tags.
+  return content;
 }
 
 // === Step 8: Strip Comments ===

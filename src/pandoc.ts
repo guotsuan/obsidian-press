@@ -28,7 +28,7 @@ function buildPandocArgs(options: PandocOptions): string[] {
     "-o",
     outputPath,
     "--from",
-    "markdown+fenced_code_blocks+fenced_code_attributes+backtick_code_blocks+pipe_tables+grid_tables+raw_html+tex_math_dollars",
+    "markdown+fenced_code_blocks+fenced_code_attributes+backtick_code_blocks+pipe_tables+grid_tables+raw_html+tex_math_dollars+superscript+subscript",
     "--to",
     format === "pdf" ? "pdf" : format === "docx" ? "docx" : "html5",
     "--standalone",

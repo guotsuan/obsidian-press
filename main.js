@@ -708,9 +708,7 @@ function convertHighlights(content) {
   return content.replace(/==([^=]+)==/g, "<mark>$1</mark>");
 }
 function convertSupSub(content) {
-  let result = content.replace(/\^([^^]+)\^/g, "<sup>$1</sup>");
-  result = result.replace(/~~([^~]+)~~/g, "<sub>$1</sub>");
-  return result;
+  return content;
 }
 function stripComments(content) {
   return content.replace(/%%[\s\S]*?%%/g, "");
@@ -801,7 +799,7 @@ function buildPandocArgs(options) {
     "-o",
     outputPath,
     "--from",
-    "markdown+fenced_code_blocks+fenced_code_attributes+backtick_code_blocks+pipe_tables+grid_tables+raw_html+tex_math_dollars",
+    "markdown+fenced_code_blocks+fenced_code_attributes+backtick_code_blocks+pipe_tables+grid_tables+raw_html+tex_math_dollars+superscript+subscript",
     "--to",
     format === "pdf" ? "pdf" : format === "docx" ? "docx" : "html5",
     "--standalone",
