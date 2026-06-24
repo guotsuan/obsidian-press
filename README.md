@@ -19,6 +19,8 @@ Press PDF Export converts Obsidian Markdown into Pandoc-compatible Markdown, the
 - **Mermaid diagrams** — Pre-render Mermaid code blocks to SVG via `mmdc`
 - **Custom styling** — Custom CSS (HTML engines) and Pandoc templates
 - **CJK support** — Auto-detect Chinese/Japanese/Korean fonts for LaTeX engines
+- **Heading font** — Set a custom font for all heading levels (H1–H4) in LaTeX PDFs, with sizes that scale proportionally with the base font size
+- **Centered title block** — Automatically places a centered title, author, version, and last-modified date at the top of every exported PDF
 - **Code highlighting** — 6 built-in themes (Pygments, Tango, Zenburn, Breeze Dark, Kate, Monochrome)
 - **Full content fidelity** — Images, math formulas, tables, callouts, wikilinks, embeds, highlights, superscript/subscript
 
@@ -218,6 +220,12 @@ Access via **Command Palette** (`Cmd/Ctrl + P`) or the ribbon icon (file output 
 | File naming | Same as source | `same` / `timestamp` / `suffix` |
 | Open after export | On | Auto-open exported file |
 
+### Document
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Author | (empty) | Default author shown in the title block. Overridden per-note by frontmatter `author:` field |
+
 ### Typography
 
 | Setting | Default | Description |
@@ -226,6 +234,7 @@ Access via **Command Palette** (`Cmd/Ctrl + P`) or the ribbon icon (file output 
 | Page size | A4 | A4, Letter, Legal, A3 |
 | Page margin | 25mm | Page margin |
 | Code theme | Tango | Syntax highlight theme. Tango is the default because it gives PDF code blocks a visible background |
+| Heading font | `STHeitiSC-Medium` | Font for H1–H4 headings in LaTeX PDF exports. Sizes scale proportionally with the base font size (1.50×, 1.33×, 1.17×, 1.00×). Leave empty to use the body font. XeLaTeX and LuaLaTeX only |
 | CJK font | (auto-detect) | Chinese/Japanese/Korean font. On macOS, XeLaTeX falls back to `STHeitiSC-Medium` when this is empty |
 | Enable CJK support | On | CJK font config for LaTeX |
 
@@ -246,6 +255,37 @@ Access via **Command Palette** (`Cmd/Ctrl + P`) or the ribbon icon (file output 
 | Concurrency | 3 | Parallel export count |
 | Skip errors | On | Continue on failure |
 
+## Title Block
+
+Every exported PDF opens with a centered title block:
+
+```
+         My Document Title
+         Author Name
+         2026-06-24 · v1.2
+```
+
+Field resolution:
+
+| Field | Source | Fallback |
+|---|---|---|
+| Title | Frontmatter `title:` | Humanized filename (`my-note` → `My Note`) |
+| Author | Frontmatter `author:` | Plugin setting **Author** |
+| Version | Frontmatter `version:` | Omitted if not present |
+| Date | File last-modified time | Current date |
+
+Example frontmatter:
+
+```yaml
+---
+title: K Array CMB Sensitivity Estimation
+author: Quan Guo
+version: "1.2"
+---
+```
+
+The title block and table of contents share the first page. Body content starts on a new page.
+
 ## Content Fidelity
 
 Obsidian-specific syntax is pre-processed before passing to Pandoc:
@@ -259,8 +299,9 @@ PDF export is powered by Pandoc engines. XeLaTeX is the recommended default for 
 | `![[image.png]]` embeds | Absolute path image references |
 | `![[other-note]]` embeds | Inlined note content (up to 5 levels deep) |
 | `==highlighted text==` | `<mark>` HTML tags |
-| `^superscript^` | `<sup>` HTML tags |
-| `~~subscript~~` | `<sub>` HTML tags |
+| `^superscript^` | Native superscript via Pandoc `+superscript` extension (renders correctly in LaTeX PDF) |
+| `~subscript~` | Native subscript via Pandoc `+subscript` extension |
+| `~~strikethrough~~` | Native strikethrough via Pandoc `+strikeout` extension |
 | `%%comment%%` | Removed from output |
 | ` ```mermaid ``` ` | Pre-rendered SVG images |
 | ` ```ts ... ``` ` code blocks | Preserved for Pandoc syntax highlighting |

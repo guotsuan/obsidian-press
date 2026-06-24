@@ -44,6 +44,12 @@ export interface PluginSettings {
   cjkFont: string;
   enableCjk: boolean;
 
+  // Heading font
+  headingFont: string;
+
+  // Document metadata
+  author: string;
+
   // Mermaid
   mermaidPath: string;
   mermaidTheme: MermaidTheme;
@@ -72,6 +78,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   codeTheme: "tango",
   cjkFont: "",
   enableCjk: true,
+  headingFont: "STHeitiSC-Medium",
+  author: "",
   mermaidPath: "mmdc",
   mermaidTheme: "default",
   extraArgs: "",
@@ -101,14 +109,21 @@ export interface PandocOptions {
   codeTheme: string;
   cjkFont: string;
   enableCjk: boolean;
+  headingFont: string;
   customCssPath?: string;
   customTemplatePath?: string;
   extraArgs: string[];
+  docTitle?: string;
+  docAuthor?: string;
+  docDate?: string;
 }
 
 export interface RenderResult {
   content: string;
   tempFiles: string[];
+  title?: string;
+  author?: string;
+  version?: string;
 }
 
 // === Callout ===

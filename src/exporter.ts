@@ -76,12 +76,27 @@ export async function exportFile(
       );
     }
 
+    // Resolve title block metadata
+    const docTitle = rendered.title ?? humanizeFilename(file.basename);
+    const docAuthor = rendered.author ?? (settings.author || undefined);
+    const mtime = file.stat?.mtime ? new Date(file.stat.mtime) : new Date();
+    const docDate = formatDocDate(mtime, rendered.version);
+
+    // For LaTeX engines inject the title block as raw LaTeX at the top of the
+    // content — this avoids the page break that \maketitle can introduce.
+    // For HTML/DOCX engines pass title/author/date as pandoc --metadata args.
+    const useRawLatexTitle = isLatexEngine(effectivePdfEngine);
+    let finalContent = rendered.content;
+    if (useRawLatexTitle) {
+      finalContent = buildLatexTitleBlock(docTitle, docAuthor, docDate) + "\n\n" + rendered.content;
+    }
+
     // Write processed content to temp file
     const tempMdPath = path.join(
       tmpDir,
       `press-${Date.now()}-${path.basename(file.path)}`
     );
-    fs.writeFileSync(tempMdPath, rendered.content, "utf8");
+    fs.writeFileSync(tempMdPath, finalContent, "utf8");
 
     // Build Pandoc options
     const pandocOptions: PandocOptions = {
@@ -97,11 +112,15 @@ export async function exportFile(
       codeTheme: settings.codeTheme,
       cjkFont: settings.cjkFont,
       enableCjk: settings.enableCjk,
+      headingFont: settings.headingFont,
       customCssPath: settings.customCssPath || undefined,
       customTemplatePath: settings.customTemplatePath || undefined,
       extraArgs: settings.extraArgs
         ? settings.extraArgs.split(/\s+/).filter(Boolean)
         : [],
+      docTitle: useRawLatexTitle ? undefined : docTitle,
+      docAuthor: useRawLatexTitle ? undefined : docAuthor,
+      docDate: useRawLatexTitle ? undefined : docDate,
     };
 
     // Run Pandoc
@@ -276,6 +295,41 @@ async function exportBatch(
 }
 
 // === Helpers ===
+
+function buildLatexTitleBlock(title: string, author?: string, date?: string): string {
+  const lines = [
+    "```{=latex}",
+    "\\begin{center}",
+    `{\\LARGE\\bfseries ${escapeLatex(title)}}`,
+  ];
+  if (author) {
+    lines.push(`\\\\[0.5em]{\\large ${escapeLatex(author)}}`);
+  }
+  if (date) {
+    lines.push(`\\\\[0.3em]{\\normalsize ${escapeLatex(date)}}`);
+  }
+  // TOC follows title on the same page; \clearpage starts content on a new page.
+  lines.push("\\end{center}", "\\vspace{2em}", "\\tableofcontents", "\\clearpage", "```");
+  return lines.join("\n");
+}
+
+function escapeLatex(text: string): string {
+  return text
+    .replace(/\\/g, "\\textbackslash{}")
+    .replace(/[&%$#_{}~^]/g, (c) => `\\${c}`);
+}
+
+function humanizeFilename(basename: string): string {
+  return basename
+    .split(/[-_\s]+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function formatDocDate(date: Date, version?: string): string {
+  const iso = date.toISOString().slice(0, 10);
+  return version ? `${iso} · v${version}` : iso;
+}
 
 function collectMarkdownFiles(folder: TFolder, files: TFile[]): void {
   for (const child of folder.children) {

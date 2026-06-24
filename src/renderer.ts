@@ -52,8 +52,11 @@ export async function renderToPandoc(
   const tmpDir = getTmpDir(app);
   const tempFiles: string[] = [];
 
-  // Step 1: Strip YAML frontmatter (preserve title as heading)
-  let rendered = stripFrontmatter(content);
+  // Step 1: Strip YAML frontmatter and collect metadata for the title block.
+  // Title/author/version are returned to the caller (exporter) which passes
+  // them to pandoc as --metadata args; they are NOT injected as headings.
+  const fm = stripFrontmatter(content);
+  let rendered = fm.content;
 
   rendered = formatFlattenedCodeBlocks(rendered);
 
@@ -97,7 +100,7 @@ export async function renderToPandoc(
   // Step 12: Restore protected code blocks/spans for Pandoc highlighting
   rendered = restoreCodeSegments(rendered, protectedCode.segments);
 
-  return { content: rendered, tempFiles };
+  return { content: rendered, tempFiles, title: fm.title, author: fm.author, version: fm.version };
 }
 
 export function formatFlattenedCodeBlocks(content: string): string {
@@ -287,23 +290,33 @@ function restoreCodeSegments(
 
 // === Step 1: YAML Frontmatter ===
 
-function stripFrontmatter(content: string): string {
+interface FrontmatterResult {
+  content: string;
+  title?: string;
+  author?: string;
+  version?: string;
+}
+
+function stripFrontmatter(content: string): FrontmatterResult {
   const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
   const match = content.match(frontmatterRegex);
 
-  if (!match) return content;
+  if (!match) return { content };
 
-  const yamlContent = match[1];
+  const yaml = match[1];
   const rest = content.slice(match[0].length);
 
-  // Extract title if present
-  const titleMatch = yamlContent.match(/^title:\s*(.+)$/m);
-  if (titleMatch) {
-    const title = titleMatch[1].replace(/^["']|["']$/g, "");
-    return `# ${title}\n\n${rest}`;
-  }
+  const extract = (key: string): string | undefined => {
+    const m = yaml.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+    return m ? m[1].replace(/^["']|["']$/g, "").trim() : undefined;
+  };
 
-  return rest;
+  return {
+    content: rest,
+    title: extract("title"),
+    author: extract("author"),
+    version: extract("version"),
+  };
 }
 
 // === Step 2: Callouts ===

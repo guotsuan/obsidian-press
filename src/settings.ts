@@ -112,6 +112,24 @@ export class ObsidianPressSettingTab extends PluginSettingTab {
           })
       );
 
+    // === Document ===
+    new Setting(containerEl).setName("Document").setHeading();
+
+    new Setting(containerEl)
+      .setName("Author")
+      .setDesc(
+        "Default author shown in the title block. Overridden per-note by frontmatter author: field."
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("Your name")
+          .setValue(this.plugin.settings.author)
+          .onChange(async (value) => {
+            this.plugin.settings.author = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
     // === Typography ===
     new Setting(containerEl).setName("Typography").setHeading();
 
@@ -201,6 +219,21 @@ export class ObsidianPressSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.enableCjk)
           .onChange(async (value) => {
             this.plugin.settings.enableCjk = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Heading font")
+      .setDesc(
+        "Font for all heading levels (H1–H4). LaTeX engines only (xelatex, lualatex). Leave empty to use the body font."
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("STHeitiSC-Medium")
+          .setValue(this.plugin.settings.headingFont)
+          .onChange(async (value) => {
+            this.plugin.settings.headingFont = value;
             await this.plugin.saveSettings();
           })
       );

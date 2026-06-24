@@ -32,8 +32,11 @@ function buildPandocArgs(options: PandocOptions): string[] {
     "--to",
     format === "pdf" ? "pdf" : format === "docx" ? "docx" : "html5",
     "--standalone",
-    "--toc",
-    "--toc-depth=3",
+    // For LaTeX engines the TOC is injected manually inside the raw LaTeX
+    // title block so it appears AFTER the title on the same page. Pandoc's
+    // auto-TOC placement always comes before the document body, which would
+    // put the TOC before the title. For other engines keep auto-TOC.
+    ...(["xelatex","lualatex","pdflatex"].includes(engine) ? [] : ["--toc", "--toc-depth=3"]),
     `--highlight-style=${codeTheme}`,
     "--resource-path",
     path.dirname(inputPath),
@@ -125,6 +128,17 @@ function buildPandocArgs(options: PandocOptions): string[] {
     args.push("--template", customTemplatePath);
   }
 
+  // Document metadata for title block
+  if (options.docTitle) {
+    args.push("--metadata", `title=${options.docTitle}`);
+  }
+  if (options.docAuthor) {
+    args.push("--metadata", `author=${options.docAuthor}`);
+  }
+  if (options.docDate) {
+    args.push("--metadata", `date=${options.docDate}`);
+  }
+
   // Extra args
   if (extraArgs.length > 0) {
     args.push(...extraArgs);
@@ -186,7 +200,7 @@ export async function exportWithPandoc(
   if (!fs.existsSync(options.tempDir)) {
     fs.mkdirSync(options.tempDir, { recursive: true });
   }
-  writeListingsHeader(options.tempDir);
+  writeListingsHeader(options.tempDir, options.engine, options.headingFont, options.enableCjk, options.fontSize);
   const texCacheDir = path.join(options.tempDir, "tex-cache");
   if (!fs.existsSync(texCacheDir)) {
     fs.mkdirSync(texCacheDir, { recursive: true });
@@ -259,9 +273,9 @@ export async function exportWithPandoc(
   });
 }
 
-function writeListingsHeader(tempDir: string): void {
+function writeListingsHeader(tempDir: string, engine: string, headingFont: string, enableCjk: boolean, fontSize: number): void {
   const headerPath = path.join(tempDir, "obsidian-press-listings.tex");
-  const content = String.raw`\lstset{
+  const listingsContent = String.raw`\lstset{
   breaklines=true,
   breakatwhitespace=false,
   columns=fullflexible,
@@ -277,7 +291,51 @@ function writeListingsHeader(tempDir: string): void {
   belowskip=0.8em
 }
 `;
-  fs.writeFileSync(headerPath, content, "utf8");
+
+  const titlingContent = "";
+
+  let headingContent = "";
+  const font = headingFont.trim();
+
+  if (font && (engine === "xelatex" || engine === "lualatex")) {
+    // Compute heading sizes as fixed ratios of the base font size so the
+    // hierarchy scales correctly regardless of which font size the user picks.
+    const h1 = (fontSize * 1.50).toFixed(2);
+    const h2 = (fontSize * 1.33).toFixed(2);
+    const h3 = (fontSize * 1.17).toFixed(2);
+    // Line spacing = font size × 1.2 (standard baseline skip)
+    const ls = (n: number) => (n * 1.2).toFixed(2);
+
+    const sizeFormats = [
+      `\\titleformat{\\section}{\\headingfont\\fontsize{${h1}pt}{${ls(+h1)}pt}\\selectfont\\bfseries}{\\thesection}{1em}{}`,
+      `\\titleformat{\\subsection}{\\headingfont\\fontsize{${h2}pt}{${ls(+h2)}pt}\\selectfont\\bfseries}{\\thesubsection}{1em}{}`,
+      `\\titleformat{\\subsubsection}{\\headingfont\\fontsize{${h3}pt}{${ls(+h3)}pt}\\selectfont\\bfseries}{\\thesubsubsection}{1em}{}`,
+      `\\titleformat{\\paragraph}{\\headingfont\\normalsize\\bfseries}{\\theparagraph}{1em}{}`,
+    ].join("\n");
+
+    if (enableCjk) {
+      // xeCJK is active: set both the Latin font (via fontspec) and the CJK
+      // font (via xeCJK) so that mixed headings like "K 阵 CMB" render fully
+      // in the chosen font instead of falling back to the body CJK font.
+      headingContent = `
+\\usepackage{titlesec}
+\\newfontfamily\\headinglatinfont{${font}}
+\\setCJKfamilyfont{headcjkfont}{${font}}
+\\newcommand{\\headingfont}{\\headinglatinfont\\CJKfamily{headcjkfont}}
+${sizeFormats}
+`;
+    } else {
+      // No xeCJK: plain fontspec is sufficient.
+      headingContent = `
+\\usepackage{fontspec}
+\\usepackage{titlesec}
+\\newfontfamily\\headingfont{${font}}
+${sizeFormats}
+`;
+    }
+  }
+
+  fs.writeFileSync(headerPath, listingsContent + titlingContent + headingContent, "utf8");
 }
 
 // === Error parsing ===

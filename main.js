@@ -58,6 +58,8 @@ var DEFAULT_SETTINGS = {
   codeTheme: "tango",
   cjkFont: "",
   enableCjk: true,
+  headingFont: "STHeitiSC-Medium",
+  author: "",
   mermaidPath: "mmdc",
   mermaidTheme: "default",
   extraArgs: "",
@@ -114,6 +116,15 @@ var ObsidianPressSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("Document").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Author").setDesc(
+      "Default author shown in the title block. Overridden per-note by frontmatter author: field."
+    ).addText(
+      (text) => text.setPlaceholder("Your name").setValue(this.plugin.settings.author).onChange(async (value) => {
+        this.plugin.settings.author = value;
+        await this.plugin.saveSettings();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("Typography").setHeading();
     new import_obsidian.Setting(containerEl).setName("Font size").setDesc("Base font size in points").addText(
       (text) => text.setPlaceholder("11").setValue(String(this.plugin.settings.fontSize)).onChange(async (value) => {
@@ -153,6 +164,14 @@ var ObsidianPressSettingTab = class extends import_obsidian.PluginSettingTab {
     new import_obsidian.Setting(containerEl).setName("Cjk support").setDesc("Add cjk font configuration for LaTeX engines").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableCjk).onChange(async (value) => {
         this.plugin.settings.enableCjk = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Heading font").setDesc(
+      "Font for all heading levels (H1\u2013H4). LaTeX engines only (xelatex, lualatex). Leave empty to use the body font."
+    ).addText(
+      (text) => text.setPlaceholder("STHeitiSC-Medium").setValue(this.plugin.settings.headingFont).onChange(async (value) => {
+        this.plugin.settings.headingFont = value;
         await this.plugin.saveSettings();
       })
     );
@@ -430,7 +449,8 @@ var CALLOUT_ICONS = {
 async function renderToPandoc(content, file, app, mermaidPath, mermaidTheme) {
   const tmpDir = getTmpDir(app);
   const tempFiles = [];
-  let rendered = stripFrontmatter(content);
+  const fm = stripFrontmatter(content);
+  let rendered = fm.content;
   rendered = formatFlattenedCodeBlocks(rendered);
   rendered = await convertMermaidBlocks(
     rendered,
@@ -450,7 +470,7 @@ async function renderToPandoc(content, file, app, mermaidPath, mermaidTheme) {
   rendered = stripComments(rendered);
   rendered = convertImageSizes(rendered);
   rendered = restoreCodeSegments(rendered, protectedCode.segments);
-  return { content: rendered, tempFiles };
+  return { content: rendered, tempFiles, title: fm.title, author: fm.author, version: fm.version };
 }
 function formatFlattenedCodeBlocks(content) {
   return content.replace(
@@ -588,17 +608,19 @@ function restoreCodeSegments(content, segments) {
 function stripFrontmatter(content) {
   const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
   const match = content.match(frontmatterRegex);
-  if (!match) return content;
-  const yamlContent = match[1];
+  if (!match) return { content };
+  const yaml = match[1];
   const rest = content.slice(match[0].length);
-  const titleMatch = yamlContent.match(/^title:\s*(.+)$/m);
-  if (titleMatch) {
-    const title = titleMatch[1].replace(/^["']|["']$/g, "");
-    return `# ${title}
-
-${rest}`;
-  }
-  return rest;
+  const extract = (key) => {
+    const m = yaml.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+    return m ? m[1].replace(/^["']|["']$/g, "").trim() : void 0;
+  };
+  return {
+    content: rest,
+    title: extract("title"),
+    author: extract("author"),
+    version: extract("version")
+  };
 }
 function convertCallouts(content) {
   const calloutRegex = /^(>\s*\[!([a-zA-Z]+)\](\+|-)?\s*(.*)?\n(?:>\s*.*\n?)*)/gm;
@@ -803,8 +825,11 @@ function buildPandocArgs(options) {
     "--to",
     format === "pdf" ? "pdf" : format === "docx" ? "docx" : "html5",
     "--standalone",
-    "--toc",
-    "--toc-depth=3",
+    // For LaTeX engines the TOC is injected manually inside the raw LaTeX
+    // title block so it appears AFTER the title on the same page. Pandoc's
+    // auto-TOC placement always comes before the document body, which would
+    // put the TOC before the title. For other engines keep auto-TOC.
+    ...["xelatex", "lualatex", "pdflatex"].includes(engine) ? [] : ["--toc", "--toc-depth=3"],
     `--highlight-style=${codeTheme}`,
     "--resource-path",
     path3.dirname(inputPath)
@@ -885,6 +910,15 @@ function buildPandocArgs(options) {
   if (customTemplatePath) {
     args.push("--template", customTemplatePath);
   }
+  if (options.docTitle) {
+    args.push("--metadata", `title=${options.docTitle}`);
+  }
+  if (options.docAuthor) {
+    args.push("--metadata", `author=${options.docAuthor}`);
+  }
+  if (options.docDate) {
+    args.push("--metadata", `date=${options.docDate}`);
+  }
   if (extraArgs.length > 0) {
     args.push(...extraArgs);
   }
@@ -925,7 +959,7 @@ async function exportWithPandoc(options) {
   if (!fs3.existsSync(options.tempDir)) {
     fs3.mkdirSync(options.tempDir, { recursive: true });
   }
-  writeListingsHeader(options.tempDir);
+  writeListingsHeader(options.tempDir, options.engine, options.headingFont, options.enableCjk, options.fontSize);
   const texCacheDir = path3.join(options.tempDir, "tex-cache");
   if (!fs3.existsSync(texCacheDir)) {
     fs3.mkdirSync(texCacheDir, { recursive: true });
@@ -987,9 +1021,9 @@ async function exportWithPandoc(options) {
     });
   });
 }
-function writeListingsHeader(tempDir) {
+function writeListingsHeader(tempDir, engine, headingFont, enableCjk, fontSize) {
   const headerPath = path3.join(tempDir, "obsidian-press-listings.tex");
-  const content = String.raw`\lstset{
+  const listingsContent = String.raw`\lstset{
   breaklines=true,
   breakatwhitespace=false,
   columns=fullflexible,
@@ -1005,7 +1039,38 @@ function writeListingsHeader(tempDir) {
   belowskip=0.8em
 }
 `;
-  fs3.writeFileSync(headerPath, content, "utf8");
+  const titlingContent = "";
+  let headingContent = "";
+  const font = headingFont.trim();
+  if (font && (engine === "xelatex" || engine === "lualatex")) {
+    const h1 = (fontSize * 1.5).toFixed(2);
+    const h2 = (fontSize * 1.33).toFixed(2);
+    const h3 = (fontSize * 1.17).toFixed(2);
+    const ls = (n) => (n * 1.2).toFixed(2);
+    const sizeFormats = [
+      `\\titleformat{\\section}{\\headingfont\\fontsize{${h1}pt}{${ls(+h1)}pt}\\selectfont\\bfseries}{\\thesection}{1em}{}`,
+      `\\titleformat{\\subsection}{\\headingfont\\fontsize{${h2}pt}{${ls(+h2)}pt}\\selectfont\\bfseries}{\\thesubsection}{1em}{}`,
+      `\\titleformat{\\subsubsection}{\\headingfont\\fontsize{${h3}pt}{${ls(+h3)}pt}\\selectfont\\bfseries}{\\thesubsubsection}{1em}{}`,
+      `\\titleformat{\\paragraph}{\\headingfont\\normalsize\\bfseries}{\\theparagraph}{1em}{}`
+    ].join("\n");
+    if (enableCjk) {
+      headingContent = `
+\\usepackage{titlesec}
+\\newfontfamily\\headinglatinfont{${font}}
+\\setCJKfamilyfont{headcjkfont}{${font}}
+\\newcommand{\\headingfont}{\\headinglatinfont\\CJKfamily{headcjkfont}}
+${sizeFormats}
+`;
+    } else {
+      headingContent = `
+\\usepackage{fontspec}
+\\usepackage{titlesec}
+\\newfontfamily\\headingfont{${font}}
+${sizeFormats}
+`;
+    }
+  }
+  fs3.writeFileSync(headerPath, listingsContent + titlingContent + headingContent, "utf8");
 }
 function parsePandocError(stderr, code) {
   if (!stderr) return `Pandoc exited with code ${code}`;
@@ -1064,6 +1129,7 @@ async function checkPandocAvailable(pandocPath) {
 
 // src/exporter.ts
 async function exportFile(file, app, settings) {
+  var _a, _b, _c;
   const vaultPath = getVaultPath(app);
   const tmpDir = getTmpDir(app);
   try {
@@ -1105,11 +1171,20 @@ async function exportFile(file, app, settings) {
         rendered.tempFiles
       );
     }
+    const docTitle = (_a = rendered.title) != null ? _a : humanizeFilename(file.basename);
+    const docAuthor = (_b = rendered.author) != null ? _b : settings.author || void 0;
+    const mtime = ((_c = file.stat) == null ? void 0 : _c.mtime) ? new Date(file.stat.mtime) : /* @__PURE__ */ new Date();
+    const docDate = formatDocDate(mtime, rendered.version);
+    const useRawLatexTitle = isLatexEngine(effectivePdfEngine);
+    let finalContent = rendered.content;
+    if (useRawLatexTitle) {
+      finalContent = buildLatexTitleBlock(docTitle, docAuthor, docDate) + "\n\n" + rendered.content;
+    }
     const tempMdPath = path4.join(
       tmpDir,
       `press-${Date.now()}-${path4.basename(file.path)}`
     );
-    fs4.writeFileSync(tempMdPath, rendered.content, "utf8");
+    fs4.writeFileSync(tempMdPath, finalContent, "utf8");
     const pandocOptions = {
       inputPath: tempMdPath,
       outputPath,
@@ -1123,9 +1198,13 @@ async function exportFile(file, app, settings) {
       codeTheme: settings.codeTheme,
       cjkFont: settings.cjkFont,
       enableCjk: settings.enableCjk,
+      headingFont: settings.headingFont,
       customCssPath: settings.customCssPath || void 0,
       customTemplatePath: settings.customTemplatePath || void 0,
-      extraArgs: settings.extraArgs ? settings.extraArgs.split(/\s+/).filter(Boolean) : []
+      extraArgs: settings.extraArgs ? settings.extraArgs.split(/\s+/).filter(Boolean) : [],
+      docTitle: useRawLatexTitle ? void 0 : docTitle,
+      docAuthor: useRawLatexTitle ? void 0 : docAuthor,
+      docDate: useRawLatexTitle ? void 0 : docDate
     };
     const result = await exportWithPandoc(pandocOptions);
     try {
@@ -1240,6 +1319,31 @@ async function exportBatch(files, app, settings, onProgress) {
     errors,
     outputDir
   };
+}
+function buildLatexTitleBlock(title, author, date) {
+  const lines = [
+    "```{=latex}",
+    "\\begin{center}",
+    `{\\LARGE\\bfseries ${escapeLatex(title)}}`
+  ];
+  if (author) {
+    lines.push(`\\\\[0.5em]{\\large ${escapeLatex(author)}}`);
+  }
+  if (date) {
+    lines.push(`\\\\[0.3em]{\\normalsize ${escapeLatex(date)}}`);
+  }
+  lines.push("\\end{center}", "\\vspace{2em}", "\\tableofcontents", "\\clearpage", "```");
+  return lines.join("\n");
+}
+function escapeLatex(text) {
+  return text.replace(/\\/g, "\\textbackslash{}").replace(/[&%$#_{}~^]/g, (c) => `\\${c}`);
+}
+function humanizeFilename(basename3) {
+  return basename3.split(/[-_\s]+/).map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+function formatDocDate(date, version) {
+  const iso = date.toISOString().slice(0, 10);
+  return version ? `${iso} \xB7 v${version}` : iso;
 }
 function collectMarkdownFiles(folder, files) {
   for (const child of folder.children) {
