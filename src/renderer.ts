@@ -509,7 +509,7 @@ function convertImageSizes(content: string): string {
 
 async function convertMermaidBlocks(
   content: string,
-  _mermaidPath: string,
+  mermaidPath: string,
   mermaidTheme: string,
   tmpDir: string,
   tempFiles: string[]
@@ -527,18 +527,24 @@ async function convertMermaidBlocks(
     index++;
 
     try {
+      const mermaid = extractMermaidCaption(code);
       const svgPath = await renderMermaidBlock(
-        code.trim(),
+        mermaid.code,
         mermaidTheme,
         tmpDir,
-        index
+        index,
+        mermaidPath
       );
 
       if (svgPath) {
         tempFiles.push(svgPath);
+        const caption =
+          mermaid.caption === undefined
+            ? `Mermaid Diagram ${index}`
+            : mermaid.caption;
         result = result.replace(
           fullMatch,
-          `![Mermaid Diagram ${index}](${svgPath})`
+          `![${escapeMarkdownImageAlt(caption)}](${svgPath})`
         );
       } else {
         // Fallback: keep as code block
@@ -553,6 +559,38 @@ async function convertMermaidBlocks(
   }
 
   return result;
+}
+
+/**
+ * Read an optional `%% caption: ...` comment from a Mermaid block.
+ * The metadata line must not be passed to Mermaid itself because its purpose
+ * is to control the surrounding Pandoc figure rather than the diagram.
+ */
+function extractMermaidCaption(code: string): {
+  code: string;
+  caption: string | undefined;
+} {
+  let caption: string | undefined;
+  const diagramLines: string[] = [];
+
+  for (const line of code.split("\n")) {
+    const match = line.match(/^\s*%%\s*caption\s*:\s*(.*?)\s*$/i);
+    if (caption === undefined && match) {
+      caption = match[1].trim();
+    } else {
+      diagramLines.push(line);
+    }
+  }
+
+  return { code: diagramLines.join("\n").trim(), caption };
+}
+
+/** Escape characters that would terminate a Pandoc Markdown image label. */
+function escapeMarkdownImageAlt(caption: string): string {
+  return caption
+    .replace(/\\/g, "\\\\")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]");
 }
 
 // === Helpers ===

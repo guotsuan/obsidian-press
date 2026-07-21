@@ -379,17 +379,29 @@ function getOutputPath(file, vaultPath, outputDir, naming, format) {
 // src/mermaid.ts
 var fs2 = __toESM(require("fs"));
 var path2 = __toESM(require("path"));
-async function renderMermaidBlock(code, theme, tmpDir, index) {
-  const mmdcAvailable = await checkCommandExists("mmdc");
+async function renderMermaidBlock(code, theme, tmpDir, index, mermaidPath = "mmdc") {
+  const mmdcAvailable = await checkCommandExists(shellQuote(mermaidPath));
   if (!mmdcAvailable) {
-    console.warn("Press PDF Export: mmdc not found, skipping Mermaid rendering");
+    console.warn(
+      `Press PDF Export: Mermaid CLI not found at ${mermaidPath}, skipping Mermaid rendering`
+    );
     return null;
   }
   const inputFile = path2.join(tmpDir, `mermaid-input-${index}.mmd`);
   const outputFile = path2.join(tmpDir, `mermaid-output-${index}.svg`);
+  const configFile = path2.join(tmpDir, `mermaid-config-${index}.json`);
   try {
     fs2.writeFileSync(inputFile, code, "utf8");
-    const cmd = `mmdc -i '${inputFile}' -o '${outputFile}' -t ${theme} -b transparent --quiet`;
+    fs2.writeFileSync(
+      configFile,
+      JSON.stringify({
+        fontFamily: 'Arial, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif',
+        htmlLabels: false,
+        flowchart: { htmlLabels: false }
+      }),
+      "utf8"
+    );
+    const cmd = `${shellQuote(mermaidPath)} -i ${shellQuote(inputFile)} -o ${shellQuote(outputFile)} -c ${shellQuote(configFile)} -t ${shellQuote(theme)} -b transparent --quiet`;
     const { code: exitCode, stderr } = await runCommand(cmd, {
       timeout: 3e4
     });
@@ -402,13 +414,18 @@ async function renderMermaidBlock(code, theme, tmpDir, index) {
     console.error("Press PDF Export: Mermaid rendering error:", err);
     return null;
   } finally {
-    try {
-      if (fs2.existsSync(inputFile)) {
-        fs2.unlinkSync(inputFile);
+    for (const tempFile of [inputFile, configFile]) {
+      try {
+        if (fs2.existsSync(tempFile)) {
+          fs2.unlinkSync(tempFile);
+        }
+      } catch (e) {
       }
-    } catch (e) {
     }
   }
+}
+function shellQuote(value) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
 // src/renderer.ts
@@ -743,7 +760,7 @@ function convertImageSizes(content) {
     }
   );
 }
-async function convertMermaidBlocks(content, _mermaidPath, mermaidTheme, tmpDir, tempFiles) {
+async function convertMermaidBlocks(content, mermaidPath, mermaidTheme, tmpDir, tempFiles) {
   const mermaidRegex = /```mermaid\n([\s\S]*?)```/g;
   let result = content;
   let match;
@@ -753,17 +770,20 @@ async function convertMermaidBlocks(content, _mermaidPath, mermaidTheme, tmpDir,
     const [fullMatch, code] = match;
     index++;
     try {
+      const mermaid = extractMermaidCaption(code);
       const svgPath = await renderMermaidBlock(
-        code.trim(),
+        mermaid.code,
         mermaidTheme,
         tmpDir,
-        index
+        index,
+        mermaidPath
       );
       if (svgPath) {
         tempFiles.push(svgPath);
+        const caption = mermaid.caption === void 0 ? `Mermaid Diagram ${index}` : mermaid.caption;
         result = result.replace(
           fullMatch,
-          `![Mermaid Diagram ${index}](${svgPath})`
+          `![${escapeMarkdownImageAlt(caption)}](${svgPath})`
         );
       } else {
         result = result.replace(
@@ -775,6 +795,22 @@ async function convertMermaidBlocks(content, _mermaidPath, mermaidTheme, tmpDir,
     }
   }
   return result;
+}
+function extractMermaidCaption(code) {
+  let caption;
+  const diagramLines = [];
+  for (const line of code.split("\n")) {
+    const match = line.match(/^\s*%%\s*caption\s*:\s*(.*?)\s*$/i);
+    if (caption === void 0 && match) {
+      caption = match[1].trim();
+    } else {
+      diagramLines.push(line);
+    }
+  }
+  return { code: diagramLines.join("\n").trim(), caption };
+}
+function escapeMarkdownImageAlt(caption) {
+  return caption.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
 }
 function getRelativePath(from, to) {
   const fromDir = from.substring(0, from.lastIndexOf("/"));

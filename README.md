@@ -304,11 +304,33 @@ PDF export is powered by Pandoc engines. XeLaTeX is the recommended default for 
 | `~~strikethrough~~` | Native strikethrough via Pandoc `+strikeout` extension |
 | `%%comment%%` | Removed from output |
 | ` ```mermaid ``` ` | Pre-rendered SVG images |
+| `%% caption: Diagram title` inside a Mermaid block | Custom figure caption |
 | ` ```ts ... ``` ` code blocks | Preserved for Pandoc syntax highlighting |
 | Inline code spans | Preserved without Obsidian syntax conversion |
 | LaTeX math (`$...$`, `$$...$$`) | Native Pandoc math rendering |
 | Pipe/grid tables | Native Pandoc table support |
 | Images with `\|size` | Resized image tags |
+
+### Mermaid captions
+
+Add a `%% caption:` comment inside a Mermaid block to set the exported
+figure caption:
+
+````markdown
+```mermaid
+%% caption: Observation and data processing workflow
+flowchart LR
+    A["Observation design"] --> B["System checks"]
+```
+````
+
+If the directive is omitted, the caption defaults to `Mermaid Diagram N`.
+Use an empty directive (`%% caption:`) to export the diagram without a
+caption. Caption metadata is removed before Mermaid renders the diagram.
+
+Mermaid flowchart labels are rendered as native SVG text instead of HTML
+`foreignObject` elements, so labels—including CJK text—remain visible when
+Pandoc's PDF pipeline converts the SVG.
 
 ## Project Structure
 
