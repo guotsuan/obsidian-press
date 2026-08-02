@@ -4,6 +4,15 @@ All notable changes to Press PDF Export are documented here.
 
 This project follows semantic versioning where practical.
 
+## 1.2.0 - 2026-08-03
+
+- Fixed local PNG and other Markdown image paths so files resolve relative to the source note, vault root, configured attachment folder, or Obsidian metadata, including images inside embedded notes.
+- Set ordinary images to 95% of the available page width by default and cap oversized numeric pixel widths at the same limit, while preserving smaller explicit widths and Mermaid's original sizing.
+- Added automatic figure numbering only for images followed by italic `图 X：...` or `Figure X: ...` caption lines; images without these markers remain unnumbered.
+- Added language-aware figure labels so Chinese captions use `图` and English captions use `Figure`.
+- Added LaTeX math parsing in image captions, preserving commands and supporting `$...$`, `$$...$$`, `\(...\)`, and `\[...\]` delimiters.
+- Improved caption parsing for formulas containing asterisks or bracketed expressions.
+
 ## 1.1.0 - 2026-07-21
 
 - Fixed missing Mermaid node labels in PDF exports by rendering labels as native SVG text with CJK font fallbacks.
