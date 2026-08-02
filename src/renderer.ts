@@ -1,5 +1,6 @@
 import { App, TFile } from "obsidian";
-import { RenderResult, CalloutType } from "./types";
+import * as path from "path";
+import { RenderResult, CalloutType, PageSize } from "./types";
 import { resolveAttachmentPath, getTmpDir } from "./utils";
 import { renderMermaidBlock } from "./mermaid";
 
@@ -47,7 +48,9 @@ export async function renderToPandoc(
   file: TFile,
   app: App,
   mermaidPath: string,
-  mermaidTheme: string
+  mermaidTheme: string,
+  pageSize: PageSize = "A4",
+  pageMargin = "25"
 ): Promise<RenderResult> {
   const tmpDir = getTmpDir(app);
   const tempFiles: string[] = [];
@@ -57,6 +60,7 @@ export async function renderToPandoc(
   // them to pandoc as --metadata args; they are NOT injected as headings.
   const fm = stripFrontmatter(content);
   let rendered = fm.content;
+  let figureLabel: RenderResult["figureLabel"];
 
   rendered = formatFlattenedCodeBlocks(rendered);
 
@@ -76,14 +80,16 @@ export async function renderToPandoc(
   // Step 4: Convert callouts
   rendered = convertCallouts(rendered);
 
-  // Step 5: Convert wikilinks to standard links
-  rendered = convertWikilinks(rendered, file, app);
-
-  // Step 6: Convert embedded images ![[img.png]] → ![img](abs/path)
+  // Step 5: Resolve images before wikilinks. Otherwise ![[img.png]] is
+  // partially consumed by the generic [[wikilink]] conversion.
   rendered = convertEmbeds(rendered, file, app);
+  rendered = resolveMarkdownImages(rendered, file, app);
 
-  // Step 7: Inline embedded notes ![[other-note]] (limited depth)
+  // Step 6: Inline embedded notes ![[other-note]] (limited depth)
   rendered = await inlineNoteEmbeds(rendered, file, app, 0, 5);
+
+  // Step 7: Convert remaining wikilinks to standard links
+  rendered = convertWikilinks(rendered, file, app);
 
   // Step 8: Convert ==highlight== → <mark>highlight</mark>
   rendered = convertHighlights(rendered);
@@ -97,10 +103,25 @@ export async function renderToPandoc(
   // Step 11: Convert Obsidian-style images with size ![[img.png|200]]
   rendered = convertImageSizes(rendered);
 
-  // Step 12: Restore protected code blocks/spans for Pandoc highlighting
+  // Step 12: Only images followed by an explicit Chinese/English figure line
+  // receive a caption (and therefore Pandoc numbering). Other image alts are
+  // cleared so standalone images remain unnumbered.
+  const captionResult = processImageCaptions(rendered);
+  rendered = captionResult.content;
+  figureLabel = captionResult.figureLabel;
+  rendered = applyDefaultImageWidths(rendered, pageSize, pageMargin);
+
+  // Step 13: Restore protected code blocks/spans for Pandoc highlighting
   rendered = restoreCodeSegments(rendered, protectedCode.segments);
 
-  return { content: rendered, tempFiles, title: fm.title, author: fm.author, version: fm.version };
+  return {
+    content: rendered,
+    tempFiles,
+    title: fm.title,
+    author: fm.author,
+    version: fm.version,
+    figureLabel,
+  };
 }
 
 export function formatFlattenedCodeBlocks(content: string): string {
@@ -364,13 +385,19 @@ function convertWikilinks(content: string, file: TFile, app: App): string {
   // [[target]] or [[target|alias]]
   return content.replace(
     /\[\[([^\]|]+?)(?:\|([^\]]*?))?\]\]/g,
-    (_match: string, target: string, alias: string | undefined) => {
-      const displayText = alias || target;
-
-      // If it looks like an image, don't convert as link
-      if (/\.(png|jpg|jpeg|gif|svg|webp|bmp|ico)$/i.test(target)) {
-        return displayText;
+    (
+      match: string,
+      target: string,
+      alias: string | undefined,
+      offset: number
+    ) => {
+      // Image and note embeds use ![[...]] and are handled separately. Keep
+      // unresolved embeds intact rather than turning them into literal text.
+      if (offset > 0 && content[offset - 1] === "!") {
+        return match;
       }
+
+      const displayText = alias || target;
 
       // Try to resolve as note file
       const resolvedFile = app.metadataCache.getFirstLinkpathDest(
@@ -408,12 +435,73 @@ function convertEmbeds(
     if (/\.(png|jpg|jpeg|gif|svg|webp|bmp|ico)$/i.test(src)) {
       const absPath = resolveAttachmentPath(src, file, app);
       const sizeAttr = size ? ` width="${size}"` : "";
-      const replacement = `![${src}](${absPath})${sizeAttr ? "{width=" + size + "}" : ""}`;
+      const replacement = `![${src}](<${absPath}>)${sizeAttr ? "{width=" + size + "}" : ""}`;
       result = result.replace(fullMatch, replacement);
     }
   }
 
   return result;
+}
+
+/**
+ * Resolve local images written with standard Markdown syntax relative to the
+ * source note, the vault root, or Obsidian's attachment directory. Pandoc
+ * reads a temporary Markdown file, so unresolved relative paths would
+ * otherwise be looked up from the plugin temp directory.
+ */
+function resolveMarkdownImages(
+  content: string,
+  file: TFile,
+  app: App
+): string {
+  const imageRegex =
+    /!\[([^\]]*)\]\(\s*(<[^>\n]+>|[^)\n]*?)\s*\)(\{[^}\n]*\})?/g;
+
+  return content.replace(
+    imageRegex,
+    (fullMatch, alt: string, rawTarget: string, attributes = "") => {
+      const parsed = splitMarkdownImageTarget(rawTarget);
+      const target = stripMarkdownUrlDelimiters(parsed.destination);
+
+      if (
+        !target ||
+        path.isAbsolute(target) ||
+        /^(?:https?:|data:|file:|#)/i.test(target)
+      ) {
+        return fullMatch;
+      }
+
+      const resolvedPath = resolveAttachmentPath(target, file, app);
+      if (!path.isAbsolute(resolvedPath)) {
+        return fullMatch;
+      }
+
+      return `![${alt}](<${resolvedPath}>${parsed.title})${attributes}`;
+    }
+  );
+}
+
+function splitMarkdownImageTarget(rawTarget: string): {
+  destination: string;
+  title: string;
+} {
+  const trimmed = rawTarget.trim();
+  const titleMatch = trimmed.match(/^(.*?)(\s+(?:"[^"\n]*"|'[^'\n]*'))$/);
+  if (!titleMatch) {
+    return { destination: trimmed, title: "" };
+  }
+
+  return {
+    destination: titleMatch[1].trim(),
+    title: titleMatch[2],
+  };
+}
+
+function stripMarkdownUrlDelimiters(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.startsWith("<") && trimmed.endsWith(">")
+    ? trimmed.slice(1, -1)
+    : trimmed;
 }
 
 // === Step 5: Inline Note Embeds ===
@@ -449,9 +537,14 @@ async function inlineNoteEmbeds(
     if (resolvedFile instanceof TFile && resolvedFile.extension === "md") {
       const embedContent = await app.vault.read(resolvedFile);
 
-      // Recursively process embedded content
-      const processed = await inlineNoteEmbeds(
-        embedContent,
+      // Resolve images against the embedded note before inserting its content
+      // into the parent note, preserving the embedded note's path context.
+      let processed = convertEmbeds(embedContent, resolvedFile, app);
+      processed = resolveMarkdownImages(processed, resolvedFile, app);
+
+      // Recursively process nested note embeds.
+      processed = await inlineNoteEmbeds(
+        processed,
         resolvedFile,
         app,
         depth + 1,
@@ -505,6 +598,172 @@ function convertImageSizes(content: string): string {
   );
 }
 
+/**
+ * Convert explicit Chinese/English figure lines into Pandoc implicit-figure
+ * captions. Images without such a line have their alt cleared, preventing
+ * Pandoc from numbering them as figures.
+ *
+ *   ![alt](image.png)
+ *   *图 1：Caption text*
+ *   *Figure 1: Caption text*
+ *
+ * Pandoc supplies the figure number, so only the text after the first Chinese
+ * or ASCII colon is used as the image label. The standalone italic line is
+ * removed to avoid rendering the caption twice.
+ */
+function processImageCaptions(content: string): {
+  content: string;
+  figureLabel: RenderResult["figureLabel"];
+} {
+  const imageRegex =
+    /!\[([^\]]*)\](\(\s*(?:<[^>\n]+>|[^)\n]*?)\s*\))(\{[^}\n]*\})?/g;
+  const followingCaptionRegex =
+    /^[ \t]*\r?\n(?:[ \t]*\r?\n)*[ \t]*\*((?:图|Figure)\s*[^\n]+)\*[ \t]*(?=\r?\n|$)/i;
+
+  let result = "";
+  let cursor = 0;
+  let figureLabel: RenderResult["figureLabel"];
+  let match: RegExpExecArray | null;
+
+  while ((match = imageRegex.exec(content)) !== null) {
+    const [_fullMatch, alt, destination, rawAttributes = ""] = match;
+    result += content.slice(cursor, match.index);
+
+    const afterImage = content.slice(imageRegex.lastIndex);
+    const followingCaption = afterImage.match(followingCaptionRegex);
+    const parsedCaption = followingCaption
+      ? parseFigureCaption(followingCaption[1])
+      : null;
+    const hasExplicitCaptionMarker = rawAttributes.includes(
+      ".press-explicit-caption"
+    );
+    const attributes = removeExplicitCaptionMarker(rawAttributes);
+
+    if (parsedCaption && followingCaption) {
+      const caption = escapeMarkdownImageAlt(parsedCaption.caption);
+      result += `![${caption}]${destination}${attributes}`;
+      figureLabel ??= parsedCaption.label;
+      cursor = imageRegex.lastIndex + followingCaption[0].length;
+      imageRegex.lastIndex = cursor;
+    } else if (hasExplicitCaptionMarker && alt) {
+      result += `![${alt}]${destination}${attributes}`;
+      figureLabel ??= containsCjkText(alt) ? "图" : "Figure";
+      cursor = imageRegex.lastIndex;
+    } else {
+      result += `![]${destination}${attributes}`;
+      cursor = imageRegex.lastIndex;
+    }
+
+  }
+
+  result += content.slice(cursor);
+  return { content: result, figureLabel };
+}
+
+function parseFigureCaption(
+  line: string
+): { caption: string; label: "图" | "Figure" } | null {
+  const identifier = "[0-9A-Za-z一二三四五六七八九十百零〇IVXLCDMivxlcdm-]+";
+  const chinese = line
+    .trim()
+    .match(new RegExp(`^图\\s*${identifier}\\s*[：:]\\s*(.+)$`, "u"));
+  if (chinese?.[1]?.trim()) {
+    return { caption: chinese[1].trim(), label: "图" };
+  }
+
+  const english = line
+    .trim()
+    .match(new RegExp(`^Figure\\s+${identifier}\\s*[：:]\\s*(.+)$`, "iu"));
+  if (english?.[1]?.trim()) {
+    return { caption: english[1].trim(), label: "Figure" };
+  }
+
+  return null;
+}
+
+function removeExplicitCaptionMarker(attributes: string): string {
+  if (!attributes) return "";
+  const remaining = attributes
+    .slice(1, -1)
+    .split(/\s+/)
+    .filter((attribute) => attribute !== ".press-explicit-caption")
+    .join(" ");
+  return remaining ? `{${remaining}}` : "";
+}
+
+function containsCjkText(value: string): boolean {
+  return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u.test(value);
+}
+
+/** Add a portable Pandoc width unless the author supplied one explicitly. */
+function applyDefaultImageWidths(
+  content: string,
+  pageSize: PageSize,
+  pageMargin: string
+): string {
+  const markdownImageRegex =
+    /(!\[[^\]]*\]\(\s*(?:<[^>\n]+>|[^)\n]*?)\s*\))(\{[^}\n]*\})?/g;
+  const maxPixelWidth = getDefaultImagePixelWidth(pageSize, pageMargin);
+
+  return content.replace(
+    markdownImageRegex,
+    (_fullMatch, image: string, attributes: string | undefined) => {
+      if (attributes?.includes(".press-mermaid")) {
+        return `${image}${removeImageMarker(attributes, ".press-mermaid")}`;
+      }
+      if (!attributes) {
+        return `${image}{width=95%}`;
+      }
+
+      const attributeBody = attributes.slice(1, -1);
+      const widthMatch = attributeBody.match(
+        /(?:^|\s)width\s*=\s*(?:"(\d+(?:\.\d+)?)(?:px)?"|(\d+(?:\.\d+)?)(?:px)?)(?=\s|$)/i
+      );
+      if (widthMatch) {
+        const numericWidth = Number(widthMatch[1] || widthMatch[2]);
+        if (numericWidth > maxPixelWidth) {
+          const normalized = attributeBody
+            .replace(widthMatch[0], `${widthMatch[0].startsWith(" ") ? " " : ""}width=95%`)
+            .trim();
+          return `${image}{${normalized}}`;
+        }
+        return `${image}${attributes}`;
+      }
+      if (/(?:^|\s)width\s*=/.test(attributeBody)) {
+        return `${image}${attributes}`;
+      }
+
+      const existing = attributeBody.trim();
+      return `${image}{${existing ? existing + " " : ""}width=95%}`;
+    }
+  );
+}
+
+function getDefaultImagePixelWidth(
+  pageSize: PageSize,
+  pageMargin: string
+): number {
+  const pageWidthsMm: Record<PageSize, number> = {
+    A4: 210,
+    Letter: 215.9,
+    Legal: 215.9,
+    A3: 297,
+  };
+  const parsedMargin = Number.parseFloat(pageMargin);
+  const marginMm = Number.isFinite(parsedMargin) ? parsedMargin : 25;
+  const contentWidthMm = Math.max(pageWidthsMm[pageSize] - 2 * marginMm, 25);
+  return (contentWidthMm / 25.4) * 96 * 0.95;
+}
+
+function removeImageMarker(attributes: string, marker: string): string {
+  const remaining = attributes
+    .slice(1, -1)
+    .split(/\s+/)
+    .filter((attribute) => attribute && attribute !== marker)
+    .join(" ");
+  return remaining ? `{${remaining}}` : "";
+}
+
 // === Step 10: Mermaid Blocks ===
 
 async function convertMermaidBlocks(
@@ -542,9 +801,15 @@ async function convertMermaidBlocks(
           mermaid.caption === undefined
             ? `Mermaid Diagram ${index}`
             : mermaid.caption;
+        const markers = [
+          ".press-mermaid",
+          ...(mermaid.caption === undefined
+            ? []
+            : [".press-explicit-caption"]),
+        ].join(" ");
         result = result.replace(
           fullMatch,
-          `![${escapeMarkdownImageAlt(caption)}](${svgPath})`
+          `![${escapeMarkdownImageAlt(caption)}](${svgPath}){${markers}}`
         );
       } else {
         // Fallback: keep as code block
@@ -585,12 +850,54 @@ function extractMermaidCaption(code: string): {
   return { code: diagramLines.join("\n").trim(), caption };
 }
 
-/** Escape characters that would terminate a Pandoc Markdown image label. */
+/**
+ * Escape Markdown brackets outside math while preserving LaTeX commands.
+ * Backslashes inside `$...$`, `$$...$$`, `\(...\)`, and `\[...\]` must
+ * reach Pandoc unchanged or commands such as `\alpha` become invalid.
+ */
 function escapeMarkdownImageAlt(caption: string): string {
-  return caption
-    .replace(/\\/g, "\\\\")
-    .replace(/\[/g, "\\[")
-    .replace(/\]/g, "\\]");
+  let result = "";
+  let mathEnd: "$" | "$$" | "\\)" | "\\]" | null = null;
+
+  for (let index = 0; index < caption.length;) {
+    if (mathEnd) {
+      if (caption.startsWith(mathEnd, index)) {
+        result += mathEnd;
+        index += mathEnd.length;
+        mathEnd = null;
+      } else {
+        result += caption[index];
+        index++;
+      }
+      continue;
+    }
+
+    if (caption.startsWith("$$", index)) {
+      result += "$$";
+      index += 2;
+      mathEnd = "$$";
+    } else if (caption[index] === "$") {
+      result += "$";
+      index++;
+      mathEnd = "$";
+    } else if (caption.startsWith("\\(", index)) {
+      result += "\\(";
+      index += 2;
+      mathEnd = "\\)";
+    } else if (caption.startsWith("\\[", index)) {
+      result += "\\[";
+      index += 2;
+      mathEnd = "\\]";
+    } else if (caption[index] === "[" || caption[index] === "]") {
+      result += `\\${caption[index]}`;
+      index++;
+    } else {
+      result += caption[index];
+      index++;
+    }
+  }
+
+  return result;
 }
 
 // === Helpers ===

@@ -116,6 +116,7 @@ export interface PandocOptions {
   docTitle?: string;
   docAuthor?: string;
   docDate?: string;
+  figureLabel?: "图" | "Figure";
 }
 
 export interface RenderResult {
@@ -124,6 +125,7 @@ export interface RenderResult {
   title?: string;
   author?: string;
   version?: string;
+  figureLabel?: "图" | "Figure";
 }
 
 // === Callout ===

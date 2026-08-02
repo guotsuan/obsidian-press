@@ -28,7 +28,7 @@ function buildPandocArgs(options: PandocOptions): string[] {
     "-o",
     outputPath,
     "--from",
-    "markdown+fenced_code_blocks+fenced_code_attributes+backtick_code_blocks+pipe_tables+grid_tables+raw_html+tex_math_dollars+superscript+subscript",
+    "markdown+fenced_code_blocks+fenced_code_attributes+backtick_code_blocks+pipe_tables+grid_tables+raw_html+tex_math_dollars+tex_math_single_backslash+tex_math_double_backslash+superscript+subscript",
     "--to",
     format === "pdf" ? "pdf" : format === "docx" ? "docx" : "html5",
     "--standalone",
@@ -138,6 +138,12 @@ function buildPandocArgs(options: PandocOptions): string[] {
   if (options.docDate) {
     args.push("--metadata", `date=${options.docDate}`);
   }
+  if (engine === "typst" && options.figureLabel) {
+    args.push(
+      "--metadata",
+      `lang=${options.figureLabel === "图" ? "zh" : "en"}`
+    );
+  }
 
   // Extra args
   if (extraArgs.length > 0) {
@@ -200,7 +206,14 @@ export async function exportWithPandoc(
   if (!fs.existsSync(options.tempDir)) {
     fs.mkdirSync(options.tempDir, { recursive: true });
   }
-  writeListingsHeader(options.tempDir, options.engine, options.headingFont, options.enableCjk, options.fontSize);
+  writeListingsHeader(
+    options.tempDir,
+    options.engine,
+    options.headingFont,
+    options.enableCjk,
+    options.fontSize,
+    options.figureLabel
+  );
   const texCacheDir = path.join(options.tempDir, "tex-cache");
   if (!fs.existsSync(texCacheDir)) {
     fs.mkdirSync(texCacheDir, { recursive: true });
@@ -273,7 +286,14 @@ export async function exportWithPandoc(
   });
 }
 
-function writeListingsHeader(tempDir: string, engine: string, headingFont: string, enableCjk: boolean, fontSize: number): void {
+function writeListingsHeader(
+  tempDir: string,
+  engine: string,
+  headingFont: string,
+  enableCjk: boolean,
+  fontSize: number,
+  figureLabel?: "图" | "Figure"
+): void {
   const headerPath = path.join(tempDir, "obsidian-press-listings.tex");
   const listingsContent = String.raw`\lstset{
   breaklines=true,
@@ -293,6 +313,9 @@ function writeListingsHeader(tempDir: string, engine: string, headingFont: strin
 `;
 
   const titlingContent = "";
+  const figureLabelContent = figureLabel
+    ? `\\renewcommand{\\figurename}{${figureLabel}}\n`
+    : "";
 
   let headingContent = "";
   const font = headingFont.trim();
@@ -335,7 +358,11 @@ ${sizeFormats}
     }
   }
 
-  fs.writeFileSync(headerPath, listingsContent + titlingContent + headingContent, "utf8");
+  fs.writeFileSync(
+    headerPath,
+    listingsContent + titlingContent + figureLabelContent + headingContent,
+    "utf8"
+  );
 }
 
 // === Error parsing ===

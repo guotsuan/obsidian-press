@@ -39,7 +39,7 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian5 = require("obsidian");
 var import_electron = require("electron");
-var path5 = __toESM(require("path"));
+var path6 = __toESM(require("path"));
 
 // src/types.ts
 var DEFAULT_SETTINGS = {
@@ -229,12 +229,13 @@ var ObsidianPressSettingTab = class extends import_obsidian.PluginSettingTab {
 
 // src/exporter.ts
 var import_obsidian4 = require("obsidian");
-var path4 = __toESM(require("path"));
+var path5 = __toESM(require("path"));
 var fs4 = __toESM(require("fs"));
 var import_child_process3 = require("child_process");
 
 // src/renderer.ts
 var import_obsidian3 = require("obsidian");
+var path3 = __toESM(require("path"));
 
 // src/utils.ts
 var import_obsidian2 = require("obsidian");
@@ -275,34 +276,48 @@ function getVaultPath(app) {
 function resolveAttachmentPath(src, currentFile, app) {
   var _a;
   const vaultPath = getVaultPath(app);
-  if (path.isAbsolute(src)) {
-    return src;
+  const trimmedSrc = src.trim();
+  if (path.isAbsolute(trimmedSrc)) {
+    return trimmedSrc;
   }
-  if (src.startsWith("http://") || src.startsWith("https://")) {
-    return src;
+  if (trimmedSrc.startsWith("http://") || trimmedSrc.startsWith("https://")) {
+    return trimmedSrc;
   }
-  if (src.startsWith("data:")) {
-    return src;
+  if (trimmedSrc.startsWith("data:")) {
+    return trimmedSrc;
+  }
+  const pathOnly = trimmedSrc.replace(/[?#].*$/, "");
+  let localSrc = pathOnly;
+  try {
+    localSrc = decodeURI(pathOnly);
+  } catch (e) {
+  }
+  const indexedFile = app.metadataCache.getFirstLinkpathDest(
+    localSrc,
+    currentFile.path
+  );
+  if (indexedFile instanceof import_obsidian2.TFile) {
+    return path.join(vaultPath, indexedFile.path);
   }
   const currentDir = path.dirname(currentFile.path);
-  const relativePath = path.join(currentDir, src);
+  const relativePath = path.join(currentDir, localSrc);
   const absRelative = path.join(vaultPath, relativePath);
   if (fs.existsSync(absRelative)) {
     return absRelative;
   }
-  const absRoot = path.join(vaultPath, src);
+  const absRoot = path.join(vaultPath, localSrc);
   if (fs.existsSync(absRoot)) {
     return absRoot;
   }
   const vaultConfig = app.vault;
   const attachmentFolder = (_a = vaultConfig.getConfig) == null ? void 0 : _a.call(vaultConfig, "attachmentFolderPath");
   if (typeof attachmentFolder === "string" && attachmentFolder) {
-    const absAttachment = path.join(vaultPath, attachmentFolder, src);
+    const absAttachment = path.join(vaultPath, attachmentFolder, localSrc);
     if (fs.existsSync(absAttachment)) {
       return absAttachment;
     }
   }
-  return src;
+  return trimmedSrc;
 }
 async function checkCommandExists(cmd) {
   const platform2 = os.platform();
@@ -463,11 +478,12 @@ var CALLOUT_ICONS = {
   danger: "\u{1F6A8}",
   bug: "\u{1F41B}"
 };
-async function renderToPandoc(content, file, app, mermaidPath, mermaidTheme) {
+async function renderToPandoc(content, file, app, mermaidPath, mermaidTheme, pageSize = "A4", pageMargin = "25") {
   const tmpDir = getTmpDir(app);
   const tempFiles = [];
   const fm = stripFrontmatter(content);
   let rendered = fm.content;
+  let figureLabel;
   rendered = formatFlattenedCodeBlocks(rendered);
   rendered = await convertMermaidBlocks(
     rendered,
@@ -479,15 +495,27 @@ async function renderToPandoc(content, file, app, mermaidPath, mermaidTheme) {
   const protectedCode = protectCodeSegments(rendered);
   rendered = protectedCode.content;
   rendered = convertCallouts(rendered);
-  rendered = convertWikilinks(rendered, file, app);
   rendered = convertEmbeds(rendered, file, app);
+  rendered = resolveMarkdownImages(rendered, file, app);
   rendered = await inlineNoteEmbeds(rendered, file, app, 0, 5);
+  rendered = convertWikilinks(rendered, file, app);
   rendered = convertHighlights(rendered);
   rendered = convertSupSub(rendered);
   rendered = stripComments(rendered);
   rendered = convertImageSizes(rendered);
+  const captionResult = processImageCaptions(rendered);
+  rendered = captionResult.content;
+  figureLabel = captionResult.figureLabel;
+  rendered = applyDefaultImageWidths(rendered, pageSize, pageMargin);
   rendered = restoreCodeSegments(rendered, protectedCode.segments);
-  return { content: rendered, tempFiles, title: fm.title, author: fm.author, version: fm.version };
+  return {
+    content: rendered,
+    tempFiles,
+    title: fm.title,
+    author: fm.author,
+    version: fm.version,
+    figureLabel
+  };
 }
 function formatFlattenedCodeBlocks(content) {
   return content.replace(
@@ -671,11 +699,11 @@ ${body}
 function convertWikilinks(content, file, app) {
   return content.replace(
     /\[\[([^\]|]+?)(?:\|([^\]]*?))?\]\]/g,
-    (_match, target, alias) => {
-      const displayText = alias || target;
-      if (/\.(png|jpg|jpeg|gif|svg|webp|bmp|ico)$/i.test(target)) {
-        return displayText;
+    (match, target, alias, offset) => {
+      if (offset > 0 && content[offset - 1] === "!") {
+        return match;
       }
+      const displayText = alias || target;
       const resolvedFile = app.metadataCache.getFirstLinkpathDest(
         target,
         file.path
@@ -697,11 +725,44 @@ function convertEmbeds(content, file, app) {
     if (/\.(png|jpg|jpeg|gif|svg|webp|bmp|ico)$/i.test(src)) {
       const absPath = resolveAttachmentPath(src, file, app);
       const sizeAttr = size ? ` width="${size}"` : "";
-      const replacement = `![${src}](${absPath})${sizeAttr ? "{width=" + size + "}" : ""}`;
+      const replacement = `![${src}](<${absPath}>)${sizeAttr ? "{width=" + size + "}" : ""}`;
       result = result.replace(fullMatch, replacement);
     }
   }
   return result;
+}
+function resolveMarkdownImages(content, file, app) {
+  const imageRegex = /!\[([^\]]*)\]\(\s*(<[^>\n]+>|[^)\n]*?)\s*\)(\{[^}\n]*\})?/g;
+  return content.replace(
+    imageRegex,
+    (fullMatch, alt, rawTarget, attributes = "") => {
+      const parsed = splitMarkdownImageTarget(rawTarget);
+      const target = stripMarkdownUrlDelimiters(parsed.destination);
+      if (!target || path3.isAbsolute(target) || /^(?:https?:|data:|file:|#)/i.test(target)) {
+        return fullMatch;
+      }
+      const resolvedPath = resolveAttachmentPath(target, file, app);
+      if (!path3.isAbsolute(resolvedPath)) {
+        return fullMatch;
+      }
+      return `![${alt}](<${resolvedPath}>${parsed.title})${attributes}`;
+    }
+  );
+}
+function splitMarkdownImageTarget(rawTarget) {
+  const trimmed = rawTarget.trim();
+  const titleMatch = trimmed.match(/^(.*?)(\s+(?:"[^"\n]*"|'[^'\n]*'))$/);
+  if (!titleMatch) {
+    return { destination: trimmed, title: "" };
+  }
+  return {
+    destination: titleMatch[1].trim(),
+    title: titleMatch[2]
+  };
+}
+function stripMarkdownUrlDelimiters(value) {
+  const trimmed = value.trim();
+  return trimmed.startsWith("<") && trimmed.endsWith(">") ? trimmed.slice(1, -1) : trimmed;
 }
 async function inlineNoteEmbeds(content, currentFile, app, depth, maxDepth) {
   if (depth >= maxDepth) return content;
@@ -720,8 +781,10 @@ async function inlineNoteEmbeds(content, currentFile, app, depth, maxDepth) {
     );
     if (resolvedFile instanceof import_obsidian3.TFile && resolvedFile.extension === "md") {
       const embedContent = await app.vault.read(resolvedFile);
-      const processed = await inlineNoteEmbeds(
-        embedContent,
+      let processed = convertEmbeds(embedContent, resolvedFile, app);
+      processed = resolveMarkdownImages(processed, resolvedFile, app);
+      processed = await inlineNoteEmbeds(
+        processed,
         resolvedFile,
         app,
         depth + 1,
@@ -760,6 +823,110 @@ function convertImageSizes(content) {
     }
   );
 }
+function processImageCaptions(content) {
+  const imageRegex = /!\[([^\]]*)\](\(\s*(?:<[^>\n]+>|[^)\n]*?)\s*\))(\{[^}\n]*\})?/g;
+  const followingCaptionRegex = /^[ \t]*\r?\n(?:[ \t]*\r?\n)*[ \t]*\*((?:图|Figure)\s*[^\n]+)\*[ \t]*(?=\r?\n|$)/i;
+  let result = "";
+  let cursor = 0;
+  let figureLabel;
+  let match;
+  while ((match = imageRegex.exec(content)) !== null) {
+    const [_fullMatch, alt, destination, rawAttributes = ""] = match;
+    result += content.slice(cursor, match.index);
+    const afterImage = content.slice(imageRegex.lastIndex);
+    const followingCaption = afterImage.match(followingCaptionRegex);
+    const parsedCaption = followingCaption ? parseFigureCaption(followingCaption[1]) : null;
+    const hasExplicitCaptionMarker = rawAttributes.includes(
+      ".press-explicit-caption"
+    );
+    const attributes = removeExplicitCaptionMarker(rawAttributes);
+    if (parsedCaption && followingCaption) {
+      const caption = escapeMarkdownImageAlt(parsedCaption.caption);
+      result += `![${caption}]${destination}${attributes}`;
+      figureLabel != null ? figureLabel : figureLabel = parsedCaption.label;
+      cursor = imageRegex.lastIndex + followingCaption[0].length;
+      imageRegex.lastIndex = cursor;
+    } else if (hasExplicitCaptionMarker && alt) {
+      result += `![${alt}]${destination}${attributes}`;
+      figureLabel != null ? figureLabel : figureLabel = containsCjkText(alt) ? "\u56FE" : "Figure";
+      cursor = imageRegex.lastIndex;
+    } else {
+      result += `![]${destination}${attributes}`;
+      cursor = imageRegex.lastIndex;
+    }
+  }
+  result += content.slice(cursor);
+  return { content: result, figureLabel };
+}
+function parseFigureCaption(line) {
+  var _a, _b;
+  const identifier = "[0-9A-Za-z\u4E00\u4E8C\u4E09\u56DB\u4E94\u516D\u4E03\u516B\u4E5D\u5341\u767E\u96F6\u3007IVXLCDMivxlcdm-]+";
+  const chinese = line.trim().match(new RegExp(`^\u56FE\\s*${identifier}\\s*[\uFF1A:]\\s*(.+)$`, "u"));
+  if ((_a = chinese == null ? void 0 : chinese[1]) == null ? void 0 : _a.trim()) {
+    return { caption: chinese[1].trim(), label: "\u56FE" };
+  }
+  const english = line.trim().match(new RegExp(`^Figure\\s+${identifier}\\s*[\uFF1A:]\\s*(.+)$`, "iu"));
+  if ((_b = english == null ? void 0 : english[1]) == null ? void 0 : _b.trim()) {
+    return { caption: english[1].trim(), label: "Figure" };
+  }
+  return null;
+}
+function removeExplicitCaptionMarker(attributes) {
+  if (!attributes) return "";
+  const remaining = attributes.slice(1, -1).split(/\s+/).filter((attribute) => attribute !== ".press-explicit-caption").join(" ");
+  return remaining ? `{${remaining}}` : "";
+}
+function containsCjkText(value) {
+  return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u.test(value);
+}
+function applyDefaultImageWidths(content, pageSize, pageMargin) {
+  const markdownImageRegex = /(!\[[^\]]*\]\(\s*(?:<[^>\n]+>|[^)\n]*?)\s*\))(\{[^}\n]*\})?/g;
+  const maxPixelWidth = getDefaultImagePixelWidth(pageSize, pageMargin);
+  return content.replace(
+    markdownImageRegex,
+    (_fullMatch, image, attributes) => {
+      if (attributes == null ? void 0 : attributes.includes(".press-mermaid")) {
+        return `${image}${removeImageMarker(attributes, ".press-mermaid")}`;
+      }
+      if (!attributes) {
+        return `${image}{width=95%}`;
+      }
+      const attributeBody = attributes.slice(1, -1);
+      const widthMatch = attributeBody.match(
+        /(?:^|\s)width\s*=\s*(?:"(\d+(?:\.\d+)?)(?:px)?"|(\d+(?:\.\d+)?)(?:px)?)(?=\s|$)/i
+      );
+      if (widthMatch) {
+        const numericWidth = Number(widthMatch[1] || widthMatch[2]);
+        if (numericWidth > maxPixelWidth) {
+          const normalized = attributeBody.replace(widthMatch[0], `${widthMatch[0].startsWith(" ") ? " " : ""}width=95%`).trim();
+          return `${image}{${normalized}}`;
+        }
+        return `${image}${attributes}`;
+      }
+      if (/(?:^|\s)width\s*=/.test(attributeBody)) {
+        return `${image}${attributes}`;
+      }
+      const existing = attributeBody.trim();
+      return `${image}{${existing ? existing + " " : ""}width=95%}`;
+    }
+  );
+}
+function getDefaultImagePixelWidth(pageSize, pageMargin) {
+  const pageWidthsMm = {
+    A4: 210,
+    Letter: 215.9,
+    Legal: 215.9,
+    A3: 297
+  };
+  const parsedMargin = Number.parseFloat(pageMargin);
+  const marginMm = Number.isFinite(parsedMargin) ? parsedMargin : 25;
+  const contentWidthMm = Math.max(pageWidthsMm[pageSize] - 2 * marginMm, 25);
+  return contentWidthMm / 25.4 * 96 * 0.95;
+}
+function removeImageMarker(attributes, marker) {
+  const remaining = attributes.slice(1, -1).split(/\s+/).filter((attribute) => attribute && attribute !== marker).join(" ");
+  return remaining ? `{${remaining}}` : "";
+}
 async function convertMermaidBlocks(content, mermaidPath, mermaidTheme, tmpDir, tempFiles) {
   const mermaidRegex = /```mermaid\n([\s\S]*?)```/g;
   let result = content;
@@ -781,9 +948,13 @@ async function convertMermaidBlocks(content, mermaidPath, mermaidTheme, tmpDir, 
       if (svgPath) {
         tempFiles.push(svgPath);
         const caption = mermaid.caption === void 0 ? `Mermaid Diagram ${index}` : mermaid.caption;
+        const markers = [
+          ".press-mermaid",
+          ...mermaid.caption === void 0 ? [] : [".press-explicit-caption"]
+        ].join(" ");
         result = result.replace(
           fullMatch,
-          `![${escapeMarkdownImageAlt(caption)}](${svgPath})`
+          `![${escapeMarkdownImageAlt(caption)}](${svgPath}){${markers}}`
         );
       } else {
         result = result.replace(
@@ -810,7 +981,45 @@ function extractMermaidCaption(code) {
   return { code: diagramLines.join("\n").trim(), caption };
 }
 function escapeMarkdownImageAlt(caption) {
-  return caption.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]");
+  let result = "";
+  let mathEnd = null;
+  for (let index = 0; index < caption.length; ) {
+    if (mathEnd) {
+      if (caption.startsWith(mathEnd, index)) {
+        result += mathEnd;
+        index += mathEnd.length;
+        mathEnd = null;
+      } else {
+        result += caption[index];
+        index++;
+      }
+      continue;
+    }
+    if (caption.startsWith("$$", index)) {
+      result += "$$";
+      index += 2;
+      mathEnd = "$$";
+    } else if (caption[index] === "$") {
+      result += "$";
+      index++;
+      mathEnd = "$";
+    } else if (caption.startsWith("\\(", index)) {
+      result += "\\(";
+      index += 2;
+      mathEnd = "\\)";
+    } else if (caption.startsWith("\\[", index)) {
+      result += "\\[";
+      index += 2;
+      mathEnd = "\\]";
+    } else if (caption[index] === "[" || caption[index] === "]") {
+      result += `\\${caption[index]}`;
+      index++;
+    } else {
+      result += caption[index];
+      index++;
+    }
+  }
+  return result;
 }
 function getRelativePath(from, to) {
   const fromDir = from.substring(0, from.lastIndexOf("/"));
@@ -832,7 +1041,7 @@ function getRelativePath(from, to) {
 }
 
 // src/pandoc.ts
-var path3 = __toESM(require("path"));
+var path4 = __toESM(require("path"));
 var fs3 = __toESM(require("fs"));
 var import_child_process2 = require("child_process");
 function buildPandocArgs(options) {
@@ -851,13 +1060,13 @@ function buildPandocArgs(options) {
     customTemplatePath,
     extraArgs
   } = options;
-  const listingsHeaderPath = path3.join(options.tempDir, "obsidian-press-listings.tex");
+  const listingsHeaderPath = path4.join(options.tempDir, "obsidian-press-listings.tex");
   const args = [
     inputPath,
     "-o",
     outputPath,
     "--from",
-    "markdown+fenced_code_blocks+fenced_code_attributes+backtick_code_blocks+pipe_tables+grid_tables+raw_html+tex_math_dollars+superscript+subscript",
+    "markdown+fenced_code_blocks+fenced_code_attributes+backtick_code_blocks+pipe_tables+grid_tables+raw_html+tex_math_dollars+tex_math_single_backslash+tex_math_double_backslash+superscript+subscript",
     "--to",
     format === "pdf" ? "pdf" : format === "docx" ? "docx" : "html5",
     "--standalone",
@@ -868,7 +1077,7 @@ function buildPandocArgs(options) {
     ...["xelatex", "lualatex", "pdflatex"].includes(engine) ? [] : ["--toc", "--toc-depth=3"],
     `--highlight-style=${codeTheme}`,
     "--resource-path",
-    path3.dirname(inputPath)
+    path4.dirname(inputPath)
   ];
   const latexBase = [
     "-V",
@@ -955,6 +1164,12 @@ function buildPandocArgs(options) {
   if (options.docDate) {
     args.push("--metadata", `date=${options.docDate}`);
   }
+  if (engine === "typst" && options.figureLabel) {
+    args.push(
+      "--metadata",
+      `lang=${options.figureLabel === "\u56FE" ? "zh" : "en"}`
+    );
+  }
   if (extraArgs.length > 0) {
     args.push(...extraArgs);
   }
@@ -988,15 +1203,22 @@ async function exportWithPandoc(options) {
       duration: Date.now() - startTime
     };
   }
-  const outputDir = path3.dirname(options.outputPath);
+  const outputDir = path4.dirname(options.outputPath);
   if (!fs3.existsSync(outputDir)) {
     fs3.mkdirSync(outputDir, { recursive: true });
   }
   if (!fs3.existsSync(options.tempDir)) {
     fs3.mkdirSync(options.tempDir, { recursive: true });
   }
-  writeListingsHeader(options.tempDir, options.engine, options.headingFont, options.enableCjk, options.fontSize);
-  const texCacheDir = path3.join(options.tempDir, "tex-cache");
+  writeListingsHeader(
+    options.tempDir,
+    options.engine,
+    options.headingFont,
+    options.enableCjk,
+    options.fontSize,
+    options.figureLabel
+  );
+  const texCacheDir = path4.join(options.tempDir, "tex-cache");
   if (!fs3.existsSync(texCacheDir)) {
     fs3.mkdirSync(texCacheDir, { recursive: true });
   }
@@ -1057,8 +1279,8 @@ async function exportWithPandoc(options) {
     });
   });
 }
-function writeListingsHeader(tempDir, engine, headingFont, enableCjk, fontSize) {
-  const headerPath = path3.join(tempDir, "obsidian-press-listings.tex");
+function writeListingsHeader(tempDir, engine, headingFont, enableCjk, fontSize, figureLabel) {
+  const headerPath = path4.join(tempDir, "obsidian-press-listings.tex");
   const listingsContent = String.raw`\lstset{
   breaklines=true,
   breakatwhitespace=false,
@@ -1076,6 +1298,8 @@ function writeListingsHeader(tempDir, engine, headingFont, enableCjk, fontSize) 
 }
 `;
   const titlingContent = "";
+  const figureLabelContent = figureLabel ? `\\renewcommand{\\figurename}{${figureLabel}}
+` : "";
   let headingContent = "";
   const font = headingFont.trim();
   if (font && (engine === "xelatex" || engine === "lualatex")) {
@@ -1106,7 +1330,11 @@ ${sizeFormats}
 `;
     }
   }
-  fs3.writeFileSync(headerPath, listingsContent + titlingContent + headingContent, "utf8");
+  fs3.writeFileSync(
+    headerPath,
+    listingsContent + titlingContent + figureLabelContent + headingContent,
+    "utf8"
+  );
 }
 function parsePandocError(stderr, code) {
   if (!stderr) return `Pandoc exited with code ${code}`;
@@ -1184,7 +1412,9 @@ async function exportFile(file, app, settings) {
       file,
       app,
       settings.mermaidPath,
-      settings.mermaidTheme
+      settings.mermaidTheme,
+      settings.pageSize,
+      settings.pageMargin
     );
     if (settings.defaultFormat === "pdf") {
       rendered.content = normalizeRemoteImageUrls(rendered.content);
@@ -1216,9 +1446,9 @@ async function exportFile(file, app, settings) {
     if (useRawLatexTitle) {
       finalContent = buildLatexTitleBlock(docTitle, docAuthor, docDate) + "\n\n" + rendered.content;
     }
-    const tempMdPath = path4.join(
+    const tempMdPath = path5.join(
       tmpDir,
-      `press-${Date.now()}-${path4.basename(file.path)}`
+      `press-${Date.now()}-${path5.basename(file.path)}`
     );
     fs4.writeFileSync(tempMdPath, finalContent, "utf8");
     const pandocOptions = {
@@ -1240,7 +1470,8 @@ async function exportFile(file, app, settings) {
       extraArgs: settings.extraArgs ? settings.extraArgs.split(/\s+/).filter(Boolean) : [],
       docTitle: useRawLatexTitle ? void 0 : docTitle,
       docAuthor: useRawLatexTitle ? void 0 : docAuthor,
-      docDate: useRawLatexTitle ? void 0 : docDate
+      docDate: useRawLatexTitle ? void 0 : docDate,
+      figureLabel: rendered.figureLabel
     };
     const result = await exportWithPandoc(pandocOptions);
     try {
@@ -1347,7 +1578,7 @@ async function exportBatch(files, app, settings, onProgress) {
     await Promise.all(promises);
   }
   const vaultPath = getVaultPath(app);
-  const outputDir = path4.isAbsolute(settings.outputDir) ? settings.outputDir : path4.join(vaultPath, settings.outputDir || "pdf");
+  const outputDir = path5.isAbsolute(settings.outputDir) ? settings.outputDir : path5.join(vaultPath, settings.outputDir || "pdf");
   return {
     total,
     success,
@@ -1413,7 +1644,7 @@ async function localizeImagesForTypst(content, file, vaultPath, tmpDir, tempFile
   const localizedBySource = /* @__PURE__ */ new Map();
   let index = 0;
   for (const rawPath of references) {
-    const normalizedPath = stripMarkdownUrlDelimiters(rawPath);
+    const normalizedPath = stripMarkdownUrlDelimiters2(rawPath);
     if (/^data:/i.test(normalizedPath)) {
       continue;
     }
@@ -1435,7 +1666,7 @@ async function localizeImagesForTypst(content, file, vaultPath, tmpDir, tempFile
     }
     replacements.push({
       original: rawPath,
-      converted: `<./${path4.basename(localPath)}>`
+      converted: `<./${path5.basename(localPath)}>`
     });
   }
   let result = content;
@@ -1450,7 +1681,7 @@ async function convertWebpImagesForLatex(content, file, vaultPath, tmpDir, tempF
   const convertedBySource = /* @__PURE__ */ new Map();
   let index = 0;
   for (const rawPath of references) {
-    const normalizedPath = stripMarkdownUrlDelimiters(rawPath);
+    const normalizedPath = stripMarkdownUrlDelimiters2(rawPath);
     if (/^data:/i.test(normalizedPath)) {
       continue;
     }
@@ -1458,12 +1689,12 @@ async function convertWebpImagesForLatex(content, file, vaultPath, tmpDir, tempF
     if (!resolvedPath) {
       continue;
     }
-    if (resolvedPath.startsWith(path4.join(tmpDir, "remote-webp-"))) {
+    if (resolvedPath.startsWith(path5.join(tmpDir, "remote-webp-"))) {
       tempFiles.push(resolvedPath);
     }
     let outputPath = convertedBySource.get(resolvedPath);
     if (!outputPath) {
-      outputPath = path4.join(
+      outputPath = path5.join(
         tmpDir,
         `webp-${Date.now()}-${index++}.png`
       );
@@ -1508,7 +1739,7 @@ function trimUrlDelimiters(value) {
   return value.replace(/[)\]}|.,;:]+$/g, "");
 }
 function isLikelyImageUrl(value) {
-  const url = stripMarkdownUrlDelimiters(value);
+  const url = stripMarkdownUrlDelimiters2(value);
   if (/\.(png|jpe?g|gif|svg|webp|bmp|ico)(?:[?#].*)?$/i.test(url)) {
     return true;
   }
@@ -1526,17 +1757,17 @@ function isLikelyImageUrl(value) {
   }
 }
 function isWebpReference(reference) {
-  return /\.webp(?:[?#].*)?$/i.test(stripMarkdownUrlDelimiters(reference));
+  return /\.webp(?:[?#].*)?$/i.test(stripMarkdownUrlDelimiters2(reference));
 }
 function resolveWebpReference(rawPath, file, vaultPath) {
   return resolveImageReference(rawPath, file, vaultPath);
 }
 function resolveImageReference(rawPath, file, vaultPath) {
-  const sourcePath = stripMarkdownUrlDelimiters(rawPath);
+  const sourcePath = stripMarkdownUrlDelimiters2(rawPath);
   const decodedPath = stripUrlQueryAndHash(safeDecodeUri(sourcePath));
-  const candidates = path4.isAbsolute(decodedPath) ? [decodedPath] : [
-    path4.join(vaultPath, path4.dirname(file.path), decodedPath),
-    path4.join(vaultPath, decodedPath)
+  const candidates = path5.isAbsolute(decodedPath) ? [decodedPath] : [
+    path5.join(vaultPath, path5.dirname(file.path), decodedPath),
+    path5.join(vaultPath, decodedPath)
   ];
   for (const candidate of candidates) {
     if (fs4.existsSync(candidate)) {
@@ -1546,7 +1777,7 @@ function resolveImageReference(rawPath, file, vaultPath) {
   return null;
 }
 async function downloadRemoteWebpIfNeeded(rawUrl, tmpDir, index) {
-  const url = stripMarkdownUrlDelimiters(rawUrl);
+  const url = stripMarkdownUrlDelimiters2(rawUrl);
   const isUrlWebp = isWebpReference(url);
   let image;
   try {
@@ -1562,7 +1793,7 @@ async function downloadRemoteWebpIfNeeded(rawUrl, tmpDir, index) {
   if (!isUrlWebp && !image.contentType.includes("image/webp") && !isWebpBuffer(image.data)) {
     return null;
   }
-  const outputPath = path4.join(
+  const outputPath = path5.join(
     tmpDir,
     `remote-webp-${Date.now()}-${index}.webp`
   );
@@ -1573,13 +1804,13 @@ async function downloadRemoteImageForTypst(url, tmpDir, index) {
   try {
     const image = await downloadRemoteImage(url);
     const extension = getImageExtension(url, image.contentType, image.data);
-    const downloadedPath = path4.join(
+    const downloadedPath = path5.join(
       tmpDir,
       `remote-image-${Date.now()}-${index}.${extension}`
     );
     fs4.writeFileSync(downloadedPath, image.data);
     if (extension === "webp" || isWebpBuffer(image.data)) {
-      const pngPath = path4.join(
+      const pngPath = path5.join(
         tmpDir,
         `remote-image-${Date.now()}-${index}.png`
       );
@@ -1598,7 +1829,7 @@ async function copyLocalImageForTypst(rawPath, file, vaultPath, tmpDir, index) {
     return null;
   }
   if (isWebpReference(resolvedPath)) {
-    const outputPath2 = path4.join(
+    const outputPath2 = path5.join(
       tmpDir,
       `typst-image-${Date.now()}-${index}.png`
     );
@@ -1606,7 +1837,7 @@ async function copyLocalImageForTypst(rawPath, file, vaultPath, tmpDir, index) {
     return outputPath2;
   }
   const extension = getImageExtensionFromPath(resolvedPath);
-  const outputPath = path4.join(
+  const outputPath = path5.join(
     tmpDir,
     `typst-image-${Date.now()}-${index}.${extension}`
   );
@@ -1637,14 +1868,14 @@ function getImageExtension(url, contentType, data) {
   const formatFromQuery = getImageFormatFromQuery(url);
   if (formatFromQuery) return formatFromQuery;
   const pathname = safeUrlPathname(url);
-  const ext = path4.extname(pathname).replace(".", "").toLowerCase();
+  const ext = path5.extname(pathname).replace(".", "").toLowerCase();
   if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) {
     return ext === "jpeg" ? "jpg" : ext;
   }
   return "png";
 }
 function getImageExtensionFromPath(filePath) {
-  const ext = path4.extname(stripUrlQueryAndHash(filePath)).replace(".", "").toLowerCase();
+  const ext = path5.extname(stripUrlQueryAndHash(filePath)).replace(".", "").toLowerCase();
   if (ext === "jpeg") return "jpg";
   if (["png", "jpg", "gif", "svg", "webp"].includes(ext)) return ext;
   return "png";
@@ -1682,7 +1913,7 @@ function isSvgBuffer(data) {
   return data.toString("utf8", 0, Math.min(data.length, 256)).includes("<svg");
 }
 function createMissingImagePlaceholder(tmpDir, index) {
-  const outputPath = path4.join(
+  const outputPath = path5.join(
     tmpDir,
     `remote-image-missing-${Date.now()}-${index}.svg`
   );
@@ -1696,7 +1927,7 @@ function createMissingImagePlaceholder(tmpDir, index) {
   );
   return outputPath;
 }
-function stripMarkdownUrlDelimiters(value) {
+function stripMarkdownUrlDelimiters2(value) {
   if (value.startsWith("<") && value.endsWith(">")) {
     return value.slice(1, -1);
   }
@@ -2130,7 +2361,7 @@ ${check.errors.join("\n")}`, 8e3);
   getConfiguredOutputDirectory() {
     const vaultPath = getVaultPath(this.app);
     const outputDir = this.settings.outputDir || "pdf";
-    return path5.isAbsolute(outputDir) ? outputDir : path5.join(vaultPath, outputDir);
+    return path6.isAbsolute(outputDir) ? outputDir : path6.join(vaultPath, outputDir);
   }
   async chooseOutputDirectory() {
     var _a, _b;

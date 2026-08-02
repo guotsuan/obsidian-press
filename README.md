@@ -297,6 +297,7 @@ PDF export is powered by Pandoc engines. XeLaTeX is the recommended default for 
 | `> [!note] Title` callouts | Styled `<div>` blocks with icons and colors |
 | `[[wikilink]]` | Standard Markdown links |
 | `![[image.png]]` embeds | Absolute path image references |
+| `![caption](images/image.png)` | Local image paths resolved from the note or attachment directory |
 | `![[other-note]]` embeds | Inlined note content (up to 5 levels deep) |
 | `==highlighted text==` | `<mark>` HTML tags |
 | `^superscript^` | Native superscript via Pandoc `+superscript` extension (renders correctly in LaTeX PDF) |
@@ -310,6 +311,50 @@ PDF export is powered by Pandoc engines. XeLaTeX is the recommended default for 
 | LaTeX math (`$...$`, `$$...$$`) | Native Pandoc math rendering |
 | Pipe/grid tables | Native Pandoc table support |
 | Images with `\|size` | Resized image tags |
+
+### Image sizing and captions
+
+Images without an explicit width are exported at 95% of the available page
+width. Oversized numeric Obsidian widths are capped at that limit using the
+configured paper size and margins. Smaller numeric widths and explicit
+percentage/physical-unit Pandoc widths take precedence:
+
+```markdown
+![[image.png|420]]
+![Diagram](images/diagram.png){width=95%}
+```
+
+Mermaid diagrams keep Mermaid's original sizing and are excluded from this
+image-width rule.
+
+An image is numbered only when it is immediately followed by an italic Chinese
+or English figure line. Images without one are exported with an empty alt and
+remain unnumbered. The source prefix is removed because Pandoc supplies the
+number automatically, and the standalone line is removed to avoid duplication:
+
+```markdown
+![Original alt text](images/diagram.png)
+
+*图 1：Observation and data processing workflow*
+```
+
+LaTeX math in a caption is parsed by Pandoc. Both dollar and backslash math
+delimiters are supported, and LaTeX commands are preserved:
+
+```markdown
+![Original alt text](images/spectrum.png)
+
+*图 1：恢复信号 $T_{\rm EoR}$ 与区间 $x \in [0,1]$*
+```
+
+Chinese markers select a `图 1` caption prefix; English markers select a
+`Figure 1` prefix:
+
+```markdown
+![Original alt text](images/diagram.png)
+
+*Figure 1: Observation and data processing workflow*
+```
 
 ### Mermaid captions
 

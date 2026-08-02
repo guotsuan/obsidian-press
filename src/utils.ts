@@ -53,32 +53,52 @@ export function resolveAttachmentPath(
   app: App
 ): string {
   const vaultPath = getVaultPath(app);
+  const trimmedSrc = src.trim();
 
   // Already absolute
-  if (path.isAbsolute(src)) {
-    return src;
+  if (path.isAbsolute(trimmedSrc)) {
+    return trimmedSrc;
   }
 
   // URL — skip
-  if (src.startsWith("http://") || src.startsWith("https://")) {
-    return src;
+  if (trimmedSrc.startsWith("http://") || trimmedSrc.startsWith("https://")) {
+    return trimmedSrc;
   }
 
   // Data URI — skip
-  if (src.startsWith("data:")) {
-    return src;
+  if (trimmedSrc.startsWith("data:")) {
+    return trimmedSrc;
+  }
+
+  // Markdown paths may percent-encode spaces or non-ASCII characters. Query
+  // strings and fragments are not part of a local filesystem path.
+  const pathOnly = trimmedSrc.replace(/[?#].*$/, "");
+  let localSrc = pathOnly;
+  try {
+    localSrc = decodeURI(pathOnly);
+  } catch {
+    // Keep the original value when it contains malformed percent escapes.
+  }
+
+  // Let Obsidian resolve filename-only links and configured attachment paths.
+  const indexedFile = app.metadataCache.getFirstLinkpathDest(
+    localSrc,
+    currentFile.path
+  );
+  if (indexedFile instanceof TFile) {
+    return path.join(vaultPath, indexedFile.path);
   }
 
   // Try relative to current file directory
   const currentDir = path.dirname(currentFile.path);
-  const relativePath = path.join(currentDir, src);
+  const relativePath = path.join(currentDir, localSrc);
   const absRelative = path.join(vaultPath, relativePath);
   if (fs.existsSync(absRelative)) {
     return absRelative;
   }
 
   // Try vault root
-  const absRoot = path.join(vaultPath, src);
+  const absRoot = path.join(vaultPath, localSrc);
   if (fs.existsSync(absRoot)) {
     return absRoot;
   }
@@ -89,14 +109,14 @@ export function resolveAttachmentPath(
   };
   const attachmentFolder = vaultConfig.getConfig?.("attachmentFolderPath");
   if (typeof attachmentFolder === "string" && attachmentFolder) {
-    const absAttachment = path.join(vaultPath, attachmentFolder, src);
+    const absAttachment = path.join(vaultPath, attachmentFolder, localSrc);
     if (fs.existsSync(absAttachment)) {
       return absAttachment;
     }
   }
 
   // Fallback: return as-is (relative path, may or may not work)
-  return src;
+  return trimmedSrc;
 }
 
 // === CJK Font Detection ===

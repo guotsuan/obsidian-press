@@ -49,7 +49,9 @@ export async function exportFile(
       file,
       app,
       settings.mermaidPath,
-      settings.mermaidTheme
+      settings.mermaidTheme,
+      settings.pageSize,
+      settings.pageMargin
     );
 
     if (settings.defaultFormat === "pdf") {
@@ -121,6 +123,7 @@ export async function exportFile(
       docTitle: useRawLatexTitle ? undefined : docTitle,
       docAuthor: useRawLatexTitle ? undefined : docAuthor,
       docDate: useRawLatexTitle ? undefined : docDate,
+      figureLabel: rendered.figureLabel,
     };
 
     // Run Pandoc
