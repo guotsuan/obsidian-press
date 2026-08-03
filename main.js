@@ -1303,9 +1303,9 @@ function writeListingsHeader(tempDir, engine, headingFont, enableCjk, fontSize, 
   let headingContent = "";
   const font = headingFont.trim();
   if (font && (engine === "xelatex" || engine === "lualatex")) {
-    const h1 = (fontSize * 1.5).toFixed(2);
-    const h2 = (fontSize * 1.33).toFixed(2);
-    const h3 = (fontSize * 1.17).toFixed(2);
+    const h1 = (fontSize * 1.8).toFixed(2);
+    const h2 = (fontSize * 1.55).toFixed(2);
+    const h3 = (fontSize * 1.33).toFixed(2);
     const ls = (n) => (n * 1.2).toFixed(2);
     const sizeFormats = [
       `\\titleformat{\\section}{\\headingfont\\fontsize{${h1}pt}{${ls(+h1)}pt}\\selectfont\\bfseries}{\\thesection}{1em}{}`,

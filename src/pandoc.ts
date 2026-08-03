@@ -323,9 +323,9 @@ function writeListingsHeader(
   if (font && (engine === "xelatex" || engine === "lualatex")) {
     // Compute heading sizes as fixed ratios of the base font size so the
     // hierarchy scales correctly regardless of which font size the user picks.
-    const h1 = (fontSize * 1.50).toFixed(2);
-    const h2 = (fontSize * 1.33).toFixed(2);
-    const h3 = (fontSize * 1.17).toFixed(2);
+    const h1 = (fontSize * 1.80).toFixed(2);
+    const h2 = (fontSize * 1.55).toFixed(2);
+    const h3 = (fontSize * 1.33).toFixed(2);
     // Line spacing = font size × 1.2 (standard baseline skip)
     const ls = (n: number) => (n * 1.2).toFixed(2);
 

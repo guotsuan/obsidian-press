@@ -234,7 +234,7 @@ Access via **Command Palette** (`Cmd/Ctrl + P`) or the ribbon icon (file output 
 | Page size | A4 | A4, Letter, Legal, A3 |
 | Page margin | 25mm | Page margin |
 | Code theme | Tango | Syntax highlight theme. Tango is the default because it gives PDF code blocks a visible background |
-| Heading font | `STHeitiSC-Medium` | Font for H1–H4 headings in LaTeX PDF exports. Sizes scale proportionally with the base font size (1.50×, 1.33×, 1.17×, 1.00×). Leave empty to use the body font. XeLaTeX and LuaLaTeX only |
+| Heading font | `STHeitiSC-Medium` | Font for H1–H4 headings in LaTeX PDF exports. Sizes scale proportionally with the base font size (1.80×, 1.55×, 1.33×, 1.00×). Leave empty to use the body font. XeLaTeX and LuaLaTeX only |
 | CJK font | (auto-detect) | Chinese/Japanese/Korean font. On macOS, XeLaTeX falls back to `STHeitiSC-Medium` when this is empty |
 | Enable CJK support | On | CJK font config for LaTeX |
 
