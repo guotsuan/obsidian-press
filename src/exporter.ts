@@ -5,6 +5,7 @@ import { spawn } from "child_process";
 import { PluginSettings, ExportResult, BatchResult, PandocOptions } from "./types";
 import { renderToPandoc } from "./renderer";
 import { exportWithPandoc, checkPandocAvailable } from "./pandoc";
+import { buildLatexCoverPage, formatIsoDate } from "./cover";
 import {
   getVaultPath,
   getOutputPath,
@@ -51,7 +52,10 @@ export async function exportFile(
       settings.mermaidPath,
       settings.mermaidTheme,
       settings.pageSize,
-      settings.pageMargin
+      settings.pageMargin,
+      settings.defaultFormat === "pdf" &&
+        (effectivePdfEngine === "xelatex" || effectivePdfEngine === "lualatex") &&
+        settings.headingFont.trim().length > 0
     );
 
     if (settings.defaultFormat === "pdf") {
@@ -78,19 +82,37 @@ export async function exportFile(
       );
     }
 
-    // Resolve title block metadata
+    // Resolve cover metadata.
     const docTitle = rendered.title ?? humanizeFilename(file.basename);
     const docAuthor = rendered.author ?? (settings.author || undefined);
     const mtime = file.stat?.mtime ? new Date(file.stat.mtime) : new Date();
-    const docDate = formatDocDate(mtime, rendered.version);
+    const fallbackModified = formatIsoDate(mtime);
+    const docDate = rendered.date ?? fallbackModified;
+    const modifiedDate = rendered.modified ?? fallbackModified;
+    const metadataDate = rendered.version
+      ? `${docDate} · v${rendered.version}`
+      : docDate;
 
-    // For LaTeX engines inject the title block as raw LaTeX at the top of the
-    // content — this avoids the page break that \maketitle can introduce.
+    // For LaTeX engines inject a standalone graphic cover and move the TOC to
+    // page two. Other formats continue to receive Pandoc document metadata.
     // For HTML/DOCX engines pass title/author/date as pandoc --metadata args.
     const useRawLatexTitle = isLatexEngine(effectivePdfEngine);
     let finalContent = rendered.content;
     if (useRawLatexTitle) {
-      finalContent = buildLatexTitleBlock(docTitle, docAuthor, docDate) + "\n\n" + rendered.content;
+      finalContent =
+        buildLatexCoverPage({
+          title: docTitle,
+          subtitle: rendered.subtitle,
+          category: rendered.category,
+          tags: rendered.tags,
+          keyword: rendered.keyword,
+          author: docAuthor,
+          institution: rendered.institution,
+          version: rendered.version,
+          date: modifiedDate,
+        }) +
+        "\n\n" +
+        rendered.content;
     }
 
     // Write processed content to temp file
@@ -122,7 +144,7 @@ export async function exportFile(
         : [],
       docTitle: useRawLatexTitle ? undefined : docTitle,
       docAuthor: useRawLatexTitle ? undefined : docAuthor,
-      docDate: useRawLatexTitle ? undefined : docDate,
+      docDate: useRawLatexTitle ? undefined : metadataDate,
       figureLabel: rendered.figureLabel,
     };
 
@@ -299,39 +321,11 @@ async function exportBatch(
 
 // === Helpers ===
 
-function buildLatexTitleBlock(title: string, author?: string, date?: string): string {
-  const lines = [
-    "```{=latex}",
-    "\\begin{center}",
-    `{\\LARGE\\bfseries ${escapeLatex(title)}}`,
-  ];
-  if (author) {
-    lines.push(`\\\\[0.5em]{\\large ${escapeLatex(author)}}`);
-  }
-  if (date) {
-    lines.push(`\\\\[0.3em]{\\normalsize ${escapeLatex(date)}}`);
-  }
-  // TOC follows title on the same page; \clearpage starts content on a new page.
-  lines.push("\\end{center}", "\\vspace{2em}", "\\tableofcontents", "\\clearpage", "```");
-  return lines.join("\n");
-}
-
-function escapeLatex(text: string): string {
-  return text
-    .replace(/\\/g, "\\textbackslash{}")
-    .replace(/[&%$#_{}~^]/g, (c) => `\\${c}`);
-}
-
 function humanizeFilename(basename: string): string {
   return basename
     .split(/[-_\s]+/)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
-}
-
-function formatDocDate(date: Date, version?: string): string {
-  const iso = date.toISOString().slice(0, 10);
-  return version ? `${iso} · v${version}` : iso;
 }
 
 function collectMarkdownFiles(folder: TFolder, files: TFile[]): void {

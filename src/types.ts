@@ -123,8 +123,15 @@ export interface RenderResult {
   content: string;
   tempFiles: string[];
   title?: string;
+  subtitle?: string;
+  category?: string;
+  tags?: string[];
+  keyword?: string;
   author?: string;
+  institution?: string;
   version?: string;
+  date?: string;
+  modified?: string;
   figureLabel?: "图" | "Figure";
 }
 

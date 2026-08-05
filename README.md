@@ -19,8 +19,8 @@ Press PDF Export converts Obsidian Markdown into Pandoc-compatible Markdown, the
 - **Mermaid diagrams** — Pre-render Mermaid code blocks to SVG via `mmdc`
 - **Custom styling** — Custom CSS (HTML engines) and Pandoc templates
 - **CJK support** — Auto-detect Chinese/Japanese/Korean fonts for LaTeX engines
-- **Heading font** — Set a custom font for all heading levels (H1–H4) in LaTeX PDFs, with sizes that scale proportionally with the base font size
-- **Centered title block** — Automatically places a centered title, author, version, and last-modified date at the top of every exported PDF
+- **Heading typography** — Set a custom font for H1–H4; H2 uses a blue number tile and a light-blue rounded title bar (the tile stays blank when the H2 has no explicit number)
+- **Designed cover page** — Creates a standalone technical-document cover with title, subtitle, author, institution, version, and date, followed by the table of contents
 - **Code highlighting** — 6 built-in themes (Pygments, Tango, Zenburn, Breeze Dark, Kate, Monochrome)
 - **Full content fidelity** — Images, math formulas, tables, callouts, wikilinks, embeds, highlights, superscript/subscript
 
@@ -234,7 +234,7 @@ Access via **Command Palette** (`Cmd/Ctrl + P`) or the ribbon icon (file output 
 | Page size | A4 | A4, Letter, Legal, A3 |
 | Page margin | 25mm | Page margin |
 | Code theme | Tango | Syntax highlight theme. Tango is the default because it gives PDF code blocks a visible background |
-| Heading font | `STHeitiSC-Medium` | Font for H1–H4 headings in LaTeX PDF exports. Sizes scale proportionally with the base font size (1.80×, 1.55×, 1.33×, 1.00×). Leave empty to use the body font. XeLaTeX and LuaLaTeX only |
+| Heading font | `STHeitiSC-Medium` | Font for H1–H4 headings in LaTeX PDF exports. Sizes scale proportionally with the base font size (1.80×, 1.55×, 1.33×, 1.00×); H2 is rendered as a blue number tile plus a light-blue title bar. Leave empty to use the body font. XeLaTeX and LuaLaTeX only |
 | CJK font | (auto-detect) | Chinese/Japanese/Korean font. On macOS, XeLaTeX falls back to `STHeitiSC-Medium` when this is empty |
 | Enable CJK support | On | CJK font config for LaTeX |
 
@@ -255,36 +255,59 @@ Access via **Command Palette** (`Cmd/Ctrl + P`) or the ribbon icon (file output 
 | Concurrency | 3 | Parallel export count |
 | Skip errors | On | Continue on failure |
 
-## Title Block
+## Cover Page
 
-Every exported PDF opens with a centered title block:
-
-```
-         My Document Title
-         Author Name
-         2026-06-24 · v1.2
-```
+LaTeX PDF exports open with a clean technical-document cover: document tags in
+the blue vertical spine, category and institution above the title, a keyword in
+the central network motif, and a compact metadata block at the bottom. The table
+of contents starts on page two.
 
 Field resolution:
 
 | Field | Source | Fallback |
 |---|---|---|
 | Title | Frontmatter `title:` | Humanized filename (`my-note` → `My Note`) |
+| Subtitle | Frontmatter `subtitle:` | Not shown |
+| Category | Frontmatter `category:` | `Note` |
+| Tags | Frontmatter `tags:` | `未分类` |
+| Keyword | Frontmatter `keyword:` | `Report` |
 | Author | Frontmatter `author:` | Plugin setting **Author** |
+| Institution | Frontmatter `institution:` | `中国科学院上海天文台` |
 | Version | Frontmatter `version:` | Omitted if not present |
-| Date | File last-modified time | Current date |
+| Updated | Frontmatter `modified:` (date portion only) | File last-modified date |
+| Date metadata | Frontmatter `date:` | File last-modified date |
+
+Hierarchical Obsidian tags are shortened to their final segment on the cover.
+For example, `research/global-21cm` is displayed as `global-21cm`.
+Both inline lists (`tags: [one, two]`) and Obsidian's unindented YAML lists are
+supported:
+
+```yaml
+tags:
+- research/global-21cm
+- research/EoR
+- foreground-separation
+```
 
 Example frontmatter:
 
 ```yaml
 ---
 title: K Array CMB Sensitivity Estimation
+subtitle: Technical Reference and Analysis Report
+category: 研究笔记
+tags: [research/CMB, analysis/sensitivity, simulation]
+keyword: CMB
 author: Quan Guo
+institution: Shanghai Astronomical Observatory
 version: "1.2"
+date: 2026-08-04
+modified: 2026-08-05
 ---
 ```
 
-The title block and table of contents share the first page. Body content starts on a new page.
+Dollar-delimited LaTeX math is supported in cover fields, for example
+`title: Global $T_{\rm EoR}$ Recovery Report`.
 
 ## Content Fidelity
 
@@ -323,6 +346,10 @@ percentage/physical-unit Pandoc widths take precedence:
 ![[image.png|420]]
 ![Diagram](images/diagram.png){width=95%}
 ```
+
+For LaTeX PDF output, images at 70% width or larger reserve vertical space based
+on the source image's real aspect ratio plus a caption allowance. If the image
+fits it remains on the current page; otherwise it moves intact to the next page.
 
 Mermaid diagrams keep Mermaid's original sizing and are excluded from this
 image-width rule.

@@ -39,7 +39,7 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian5 = require("obsidian");
 var import_electron = require("electron");
-var path6 = __toESM(require("path"));
+var path7 = __toESM(require("path"));
 
 // src/types.ts
 var DEFAULT_SETTINGS = {
@@ -229,13 +229,13 @@ var ObsidianPressSettingTab = class extends import_obsidian.PluginSettingTab {
 
 // src/exporter.ts
 var import_obsidian4 = require("obsidian");
-var path5 = __toESM(require("path"));
-var fs4 = __toESM(require("fs"));
+var path6 = __toESM(require("path"));
+var fs5 = __toESM(require("fs"));
 var import_child_process3 = require("child_process");
 
 // src/renderer.ts
 var import_obsidian3 = require("obsidian");
-var path3 = __toESM(require("path"));
+var path4 = __toESM(require("path"));
 
 // src/utils.ts
 var import_obsidian2 = require("obsidian");
@@ -443,6 +443,110 @@ function shellQuote(value) {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
+// src/image-layout.ts
+var fs3 = __toESM(require("fs"));
+var path3 = __toESM(require("path"));
+var PAGE_DIMENSIONS_MM = {
+  A4: { width: 210, height: 297 },
+  Letter: { width: 215.9, height: 279.4 },
+  Legal: { width: 215.9, height: 355.6 },
+  A3: { width: 297, height: 420 }
+};
+function getImageNeedspaceFraction(markdownImage, pageSize, pageMargin, widthFraction) {
+  const dimensions = readMarkdownImageDimensions(markdownImage);
+  if (!dimensions) return 0.5;
+  const page = PAGE_DIMENSIONS_MM[pageSize];
+  const parsedMargin = Number.parseFloat(pageMargin);
+  const marginMm = Number.isFinite(parsedMargin) ? parsedMargin : 25;
+  const contentWidth = Math.max(page.width - 2 * marginMm, 25);
+  const contentHeight = Math.max(page.height - 2 * marginMm, 25);
+  const scaledHeight = contentWidth * widthFraction * (dimensions.height / dimensions.width);
+  const requiredFraction = (Math.min(scaledHeight, contentHeight * 0.88) + 12) / contentHeight;
+  return Math.min(Math.max(requiredFraction, 0.15), 0.94);
+}
+function readMarkdownImageDimensions(markdownImage) {
+  var _a;
+  const target = markdownImage.match(
+    /\]\(\s*(?:<([^>\n]+)>|([^\s)]+))/
+  );
+  const rawPath = (_a = target == null ? void 0 : target[1]) != null ? _a : target == null ? void 0 : target[2];
+  if (!rawPath) return void 0;
+  let imagePath = rawPath;
+  try {
+    imagePath = decodeURIComponent(rawPath);
+  } catch (e) {
+  }
+  if (!path3.isAbsolute(imagePath) || !fs3.existsSync(imagePath)) {
+    return void 0;
+  }
+  try {
+    const extension = path3.extname(imagePath).toLowerCase();
+    if (extension === ".png") return readPngDimensions(imagePath);
+    if (extension === ".jpg" || extension === ".jpeg") {
+      return readJpegDimensions(imagePath);
+    }
+    if (extension === ".svg") return readSvgDimensions(imagePath);
+  } catch (e) {
+    return void 0;
+  }
+  return void 0;
+}
+function readPngDimensions(imagePath) {
+  const descriptor = fs3.openSync(imagePath, "r");
+  try {
+    const header = Buffer.alloc(24);
+    if (fs3.readSync(descriptor, header, 0, header.length, 0) < header.length) {
+      return void 0;
+    }
+    const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    if (!header.subarray(0, 8).equals(pngSignature)) return void 0;
+    return validDimensions(header.readUInt32BE(16), header.readUInt32BE(20));
+  } finally {
+    fs3.closeSync(descriptor);
+  }
+}
+function readJpegDimensions(imagePath) {
+  const data = fs3.readFileSync(imagePath);
+  if (data.length < 4 || data[0] !== 255 || data[1] !== 216) {
+    return void 0;
+  }
+  let offset = 2;
+  while (offset + 8 < data.length) {
+    if (data[offset] !== 255) {
+      offset++;
+      continue;
+    }
+    const marker = data[offset + 1];
+    if (marker === 216 || marker === 217) {
+      offset += 2;
+      continue;
+    }
+    const segmentLength = data.readUInt16BE(offset + 2);
+    if (segmentLength < 2 || offset + segmentLength + 2 > data.length) break;
+    if ([192, 193, 194, 195, 197, 198, 199, 201, 202, 203, 205, 206, 207].includes(marker)) {
+      return validDimensions(
+        data.readUInt16BE(offset + 7),
+        data.readUInt16BE(offset + 5)
+      );
+    }
+    offset += segmentLength + 2;
+  }
+  return void 0;
+}
+function readSvgDimensions(imagePath) {
+  const source = fs3.readFileSync(imagePath, "utf8").slice(0, 8192);
+  const viewBox = source.match(
+    /viewBox\s*=\s*["']\s*[-\d.]+\s+[-\d.]+\s+([\d.]+)\s+([\d.]+)\s*["']/i
+  );
+  if (viewBox) return validDimensions(Number(viewBox[1]), Number(viewBox[2]));
+  const width = source.match(/\bwidth\s*=\s*["']([\d.]+)/i);
+  const height = source.match(/\bheight\s*=\s*["']([\d.]+)/i);
+  return width && height ? validDimensions(Number(width[1]), Number(height[1])) : void 0;
+}
+function validDimensions(width, height) {
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 ? { width, height } : void 0;
+}
+
 // src/renderer.ts
 var CALLOUT_TYPES = [
   "note",
@@ -478,7 +582,7 @@ var CALLOUT_ICONS = {
   danger: "\u{1F6A8}",
   bug: "\u{1F41B}"
 };
-async function renderToPandoc(content, file, app, mermaidPath, mermaidTheme, pageSize = "A4", pageMargin = "25") {
+async function renderToPandoc(content, file, app, mermaidPath, mermaidTheme, pageSize = "A4", pageMargin = "25", useLatexH2Layout = false) {
   const tmpDir = getTmpDir(app);
   const tempFiles = [];
   const fm = stripFrontmatter(content);
@@ -498,6 +602,9 @@ async function renderToPandoc(content, file, app, mermaidPath, mermaidTheme, pag
   rendered = convertEmbeds(rendered, file, app);
   rendered = resolveMarkdownImages(rendered, file, app);
   rendered = await inlineNoteEmbeds(rendered, file, app, 0, 5);
+  if (useLatexH2Layout) {
+    rendered = markH2HeadingNumbers(rendered);
+  }
   rendered = convertWikilinks(rendered, file, app);
   rendered = convertHighlights(rendered);
   rendered = convertSupSub(rendered);
@@ -512,10 +619,23 @@ async function renderToPandoc(content, file, app, mermaidPath, mermaidTheme, pag
     content: rendered,
     tempFiles,
     title: fm.title,
+    subtitle: fm.subtitle,
+    category: fm.category,
+    tags: fm.tags,
+    keyword: fm.keyword,
     author: fm.author,
+    institution: fm.institution,
     version: fm.version,
+    date: fm.date,
+    modified: fm.modified,
     figureLabel
   };
+}
+function markH2HeadingNumbers(content) {
+  return content.replace(
+    /^(##)[ \t]+(\d+(?:\.\d+)*)[.．、][ \t]+(.+)$/gm,
+    (_match, hashes, number, title) => hashes + " \\pressheadingnumber{" + number + "}" + title
+  );
 }
 function formatFlattenedCodeBlocks(content) {
   return content.replace(
@@ -653,19 +773,52 @@ function restoreCodeSegments(content, segments) {
 function stripFrontmatter(content) {
   const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
   const match = content.match(frontmatterRegex);
-  if (!match) return { content };
+  const defaults = {
+    category: "Note",
+    keyword: "Report",
+    institution: "\u4E2D\u56FD\u79D1\u5B66\u9662\u4E0A\u6D77\u5929\u6587\u53F0"
+  };
+  if (!match) return { content, ...defaults };
   const yaml = match[1];
   const rest = content.slice(match[0].length);
   const extract = (key) => {
-    const m = yaml.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
-    return m ? m[1].replace(/^["']|["']$/g, "").trim() : void 0;
+    const m = yaml.match(new RegExp(`^${key}:[ \\t]*(.*)$`, "m"));
+    const value = m == null ? void 0 : m[1].replace(/^["']|["']$/g, "").trim();
+    return value || void 0;
+  };
+  const extractTags = () => {
+    const inlineMatch = yaml.match(/^tags:[ \t]*(.*)$/m);
+    if (!inlineMatch) return void 0;
+    const inlineValue = inlineMatch[1].trim();
+    if (inlineValue) {
+      const unwrapped = inlineValue.replace(/^\[|\]$/g, "");
+      const values = unwrapped.includes(",") ? unwrapped.split(",") : [unwrapped];
+      const tags2 = values.map(cleanYamlValue).filter(Boolean);
+      return tags2.length ? tags2 : void 0;
+    }
+    const blockMatch = yaml.match(
+      /^tags:[ \t]*\r?\n((?:[ \t]*-[ \t]*[^\r\n]*(?:\r?\n|$))+)/m
+    );
+    if (!blockMatch) return void 0;
+    const tags = blockMatch[1].split(/\r?\n/).map((line) => line.replace(/^\s*-\s*/, "")).map(cleanYamlValue).filter(Boolean);
+    return tags.length ? tags : void 0;
   };
   return {
     content: rest,
     title: extract("title"),
+    subtitle: extract("subtitle"),
+    category: extract("category") || defaults.category,
+    tags: extractTags(),
+    keyword: extract("keyword") || defaults.keyword,
     author: extract("author"),
-    version: extract("version")
+    institution: extract("institution") || defaults.institution,
+    version: extract("version"),
+    date: extract("date"),
+    modified: extract("modified")
   };
+}
+function cleanYamlValue(value) {
+  return value.trim().replace(/^-\s*/, "").replace(/^['"]|['"]$/g, "").trim();
 }
 function convertCallouts(content) {
   const calloutRegex = /^(>\s*\[!([a-zA-Z]+)\](\+|-)?\s*(.*)?\n(?:>\s*.*\n?)*)/gm;
@@ -738,11 +891,11 @@ function resolveMarkdownImages(content, file, app) {
     (fullMatch, alt, rawTarget, attributes = "") => {
       const parsed = splitMarkdownImageTarget(rawTarget);
       const target = stripMarkdownUrlDelimiters(parsed.destination);
-      if (!target || path3.isAbsolute(target) || /^(?:https?:|data:|file:|#)/i.test(target)) {
+      if (!target || path4.isAbsolute(target) || /^(?:https?:|data:|file:|#)/i.test(target)) {
         return fullMatch;
       }
       const resolvedPath = resolveAttachmentPath(target, file, app);
-      if (!path3.isAbsolute(resolvedPath)) {
+      if (!path4.isAbsolute(resolvedPath)) {
         return fullMatch;
       }
       return `![${alt}](<${resolvedPath}>${parsed.title})${attributes}`;
@@ -889,7 +1042,12 @@ function applyDefaultImageWidths(content, pageSize, pageMargin) {
         return `${image}${removeImageMarker(attributes, ".press-mermaid")}`;
       }
       if (!attributes) {
-        return `${image}{width=95%}`;
+        return addLatexLargeImageGuard(
+          `${image}{width=95%}`,
+          pageSize,
+          pageMargin,
+          0.95
+        );
       }
       const attributeBody = attributes.slice(1, -1);
       const widthMatch = attributeBody.match(
@@ -899,17 +1057,50 @@ function applyDefaultImageWidths(content, pageSize, pageMargin) {
         const numericWidth = Number(widthMatch[1] || widthMatch[2]);
         if (numericWidth > maxPixelWidth) {
           const normalized = attributeBody.replace(widthMatch[0], `${widthMatch[0].startsWith(" ") ? " " : ""}width=95%`).trim();
-          return `${image}{${normalized}}`;
+          return addLatexLargeImageGuard(
+            `${image}{${normalized}}`,
+            pageSize,
+            pageMargin,
+            0.95
+          );
         }
         return `${image}${attributes}`;
       }
       if (/(?:^|\s)width\s*=/.test(attributeBody)) {
-        return `${image}${attributes}`;
+        const percentWidth = attributeBody.match(
+          /(?:^|\s)width\s*=\s*"?(\d+(?:\.\d+)?)%"?(?=\s|$)/i
+        );
+        return percentWidth && Number(percentWidth[1]) >= 70 ? addLatexLargeImageGuard(
+          `${image}${attributes}`,
+          pageSize,
+          pageMargin,
+          Number(percentWidth[1]) / 100
+        ) : `${image}${attributes}`;
       }
       const existing = attributeBody.trim();
-      return `${image}{${existing ? existing + " " : ""}width=95%}`;
+      return addLatexLargeImageGuard(
+        `${image}{${existing ? existing + " " : ""}width=95%}`,
+        pageSize,
+        pageMargin,
+        0.95
+      );
     }
   );
+}
+function addLatexLargeImageGuard(image, pageSize, pageMargin, widthFraction) {
+  const required = getImageNeedspaceFraction(
+    image,
+    pageSize,
+    pageMargin,
+    widthFraction
+  ).toFixed(3);
+  return `
+
+\`\`\`{=latex}
+\\Needspace{${required}\\textheight}
+\`\`\`
+
+${image}`;
 }
 function getDefaultImagePixelWidth(pageSize, pageMargin) {
   const pageWidthsMm = {
@@ -1041,8 +1232,8 @@ function getRelativePath(from, to) {
 }
 
 // src/pandoc.ts
-var path4 = __toESM(require("path"));
-var fs3 = __toESM(require("fs"));
+var path5 = __toESM(require("path"));
+var fs4 = __toESM(require("fs"));
 var import_child_process2 = require("child_process");
 function buildPandocArgs(options) {
   const {
@@ -1060,7 +1251,7 @@ function buildPandocArgs(options) {
     customTemplatePath,
     extraArgs
   } = options;
-  const listingsHeaderPath = path4.join(options.tempDir, "obsidian-press-listings.tex");
+  const listingsHeaderPath = path5.join(options.tempDir, "obsidian-press-listings.tex");
   const args = [
     inputPath,
     "-o",
@@ -1077,7 +1268,7 @@ function buildPandocArgs(options) {
     ...["xelatex", "lualatex", "pdflatex"].includes(engine) ? [] : ["--toc", "--toc-depth=3"],
     `--highlight-style=${codeTheme}`,
     "--resource-path",
-    path4.dirname(inputPath)
+    path5.dirname(inputPath)
   ];
   const latexBase = [
     "-V",
@@ -1196,19 +1387,19 @@ function getCjkArgs(engine, enableCjk, cjkFont) {
 async function exportWithPandoc(options) {
   const startTime = Date.now();
   const pandocPath = options.pandocPath || "pandoc";
-  if (!fs3.existsSync(options.inputPath)) {
+  if (!fs4.existsSync(options.inputPath)) {
     return {
       success: false,
       error: `Input file not found: ${options.inputPath}`,
       duration: Date.now() - startTime
     };
   }
-  const outputDir = path4.dirname(options.outputPath);
-  if (!fs3.existsSync(outputDir)) {
-    fs3.mkdirSync(outputDir, { recursive: true });
+  const outputDir = path5.dirname(options.outputPath);
+  if (!fs4.existsSync(outputDir)) {
+    fs4.mkdirSync(outputDir, { recursive: true });
   }
-  if (!fs3.existsSync(options.tempDir)) {
-    fs3.mkdirSync(options.tempDir, { recursive: true });
+  if (!fs4.existsSync(options.tempDir)) {
+    fs4.mkdirSync(options.tempDir, { recursive: true });
   }
   writeListingsHeader(
     options.tempDir,
@@ -1218,9 +1409,9 @@ async function exportWithPandoc(options) {
     options.fontSize,
     options.figureLabel
   );
-  const texCacheDir = path4.join(options.tempDir, "tex-cache");
-  if (!fs3.existsSync(texCacheDir)) {
-    fs3.mkdirSync(texCacheDir, { recursive: true });
+  const texCacheDir = path5.join(options.tempDir, "tex-cache");
+  if (!fs4.existsSync(texCacheDir)) {
+    fs4.mkdirSync(texCacheDir, { recursive: true });
   }
   const args = buildPandocArgs(options);
   return new Promise((resolve) => {
@@ -1249,8 +1440,8 @@ async function exportWithPandoc(options) {
     child.on("close", (code) => {
       const duration = Date.now() - startTime;
       if (code === 0) {
-        if (fs3.existsSync(options.outputPath)) {
-          const stats = fs3.statSync(options.outputPath);
+        if (fs4.existsSync(options.outputPath)) {
+          const stats = fs4.statSync(options.outputPath);
           if (stats.size > 0) {
             resolve({
               success: true,
@@ -1280,7 +1471,22 @@ async function exportWithPandoc(options) {
   });
 }
 function writeListingsHeader(tempDir, engine, headingFont, enableCjk, fontSize, figureLabel) {
-  const headerPath = path4.join(tempDir, "obsidian-press-listings.tex");
+  const headerPath = path5.join(tempDir, "obsidian-press-listings.tex");
+  const coverContent = String.raw`\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{needspace}
+\usetikzlibrary{calc}
+\definecolor{CoverPaper}{HTML}{F7F8FC}
+\definecolor{CoverBlue}{HTML}{3D6694}
+\definecolor{CoverPlum}{HTML}{6C5874}
+\definecolor{CoverRed}{HTML}{D84A4A}
+\definecolor{CoverLine}{HTML}{C9CBD2}
+\definecolor{CoverInk}{HTML}{17191D}
+\definecolor{CoverMuted}{HTML}{747982}
+\definecolor{HeadingBlue}{HTML}{2F67A0}
+\definecolor{HeadingTint}{HTML}{EDF3F9}
+\providecommand{\coverheadingfont}{\sffamily}
+`;
   const listingsContent = String.raw`\lstset{
   breaklines=true,
   breakatwhitespace=false,
@@ -1309,16 +1515,57 @@ function writeListingsHeader(tempDir, engine, headingFont, enableCjk, fontSize, 
     const ls = (n) => (n * 1.2).toFixed(2);
     const sizeFormats = [
       `\\titleformat{\\section}{\\headingfont\\fontsize{${h1}pt}{${ls(+h1)}pt}\\selectfont\\bfseries}{\\thesection}{1em}{}`,
-      `\\titleformat{\\subsection}{\\headingfont\\fontsize{${h2}pt}{${ls(+h2)}pt}\\selectfont\\bfseries}{\\thesubsection}{1em}{}`,
+      `\\titleformat{\\subsection}[block]{}{}{0pt}{\\presssubsectionbox}`,
       `\\titleformat{\\subsubsection}{\\headingfont\\fontsize{${h3}pt}{${ls(+h3)}pt}\\selectfont\\bfseries}{\\thesubsubsection}{1em}{}`,
       `\\titleformat{\\paragraph}{\\headingfont\\normalsize\\bfseries}{\\theparagraph}{1em}{}`
     ].join("\n");
+    const subsectionBox = String.raw`
+\DeclareRobustCommand{\pressheadingnumber}[1]{#1.\space}
+\newcommand{\presscaptureheadingnumber}[1]{\gdef\presscapturedheadingnumber{#1}}
+\newcommand{\presshideheadingnumber}[1]{}
+\newcommand{\presssubsectionbox}[1]{%
+  \begingroup
+  \def\presscapturedheadingnumber{}%
+  \begingroup
+    \let\pressheadingnumber\presscaptureheadingnumber
+    \setbox0=\hbox{#1}%
+  \endgroup
+  \let\pressheadingnumber\presshideheadingnumber
+  \noindent\begin{tikzpicture}[baseline=(pressheadingtitle.base)]
+    \node[
+      fill=HeadingBlue,
+      text=white,
+      rounded corners=2mm,
+      minimum width=15mm,
+      minimum height=11mm,
+      inner sep=0pt,
+      font=\coverheadingfont\fontsize{${h2}pt}{${ls(+h2)}pt}\selectfont\bfseries
+    ] (pressheadingnumber) {\presscapturedheadingnumber};
+    \node[
+      anchor=west,
+      fill=HeadingTint,
+      text=HeadingBlue,
+      rounded corners=2mm,
+      minimum height=11mm,
+      text width=\dimexpr\linewidth-27mm\relax,
+      align=left,
+      inner xsep=4mm,
+      inner ysep=2mm,
+      font=\coverheadingfont\fontsize{${h2}pt}{${ls(+h2)}pt}\selectfont\bfseries\boldmath
+    ] (pressheadingtitle) at ([xshift=3mm]pressheadingnumber.east) {#1};
+  \end{tikzpicture}%
+  \endgroup
+}
+\titlespacing*{\subsection}{0pt}{2.4ex plus 0.8ex minus 0.3ex}{1.5ex plus 0.4ex}
+`;
     if (enableCjk) {
       headingContent = `
 \\usepackage{titlesec}
 \\newfontfamily\\headinglatinfont{${font}}
 \\setCJKfamilyfont{headcjkfont}{${font}}
 \\newcommand{\\headingfont}{\\headinglatinfont\\CJKfamily{headcjkfont}}
+\\renewcommand{\\coverheadingfont}{\\headingfont}
+${subsectionBox}
 ${sizeFormats}
 `;
     } else {
@@ -1326,13 +1573,15 @@ ${sizeFormats}
 \\usepackage{fontspec}
 \\usepackage{titlesec}
 \\newfontfamily\\headingfont{${font}}
+\\renewcommand{\\coverheadingfont}{\\headingfont}
+${subsectionBox}
 ${sizeFormats}
 `;
     }
   }
-  fs3.writeFileSync(
+  fs4.writeFileSync(
     headerPath,
-    listingsContent + titlingContent + figureLabelContent + headingContent,
+    coverContent + listingsContent + titlingContent + figureLabelContent + headingContent,
     "utf8"
   );
 }
@@ -1391,9 +1640,98 @@ async function checkPandocAvailable(pandocPath) {
   });
 }
 
+// src/cover.ts
+function buildLatexCoverPage(metadata) {
+  var _a, _b;
+  const title = escapeLatexPreservingMath(metadata.title);
+  const subtitle = ((_a = metadata.subtitle) == null ? void 0 : _a.trim()) ? escapeLatexPreservingMath(metadata.subtitle.trim()) : void 0;
+  const category = metadata.category ? escapeLatexPreservingMath(metadata.category) : "Note";
+  const tagLeaves = ((_b = metadata.tags) != null ? _b : []).map(extractTagLeaf).filter(Boolean);
+  const tags = tagLeaves.length ? tagLeaves.map(escapeLatexPreservingMath).join(" \xB7 ") : "\u672A\u5206\u7C7B";
+  const keyword = metadata.keyword ? escapeLatexPreservingMath(metadata.keyword) : "Report";
+  const author = metadata.author ? escapeLatexPreservingMath(metadata.author) : "\\textemdash{}";
+  const institution = metadata.institution ? escapeLatexPreservingMath(metadata.institution) : "\u4E2D\u56FD\u79D1\u5B66\u9662\u4E0A\u6D77\u5929\u6587\u53F0";
+  const version = metadata.version ? escapeLatexPreservingMath(formatVersion(metadata.version)) : "\\textemdash{}";
+  const date = escapeLatexPreservingMath(formatDateOnly(metadata.date));
+  return [
+    "```{=latex}",
+    "\\begin{titlepage}",
+    "\\thispagestyle{empty}",
+    "\\begin{tikzpicture}[remember picture,overlay]",
+    "% Light technical-document ground and a strong blue spine.",
+    "\\fill[CoverPaper] (current page.south west) rectangle (current page.north east);",
+    "\\fill[CoverBlue] (current page.south west) rectangle ($(current page.north west)+(25mm,0)$);",
+    "% Document tags run vertically inside the spine.",
+    `\\node[rotate=90,align=center,text=white,font=\\coverheadingfont\\bfseries\\fontsize{13}{18}\\selectfont] at ($(current page.west)+(12.5mm,0)$) {${tags}};`,
+    "% Editorial title block.",
+    `\\node[anchor=north west,text=CoverInk,font=\\coverheadingfont\\bfseries\\fontsize{12}{15}\\selectfont] at ($(current page.north west)+(47mm,-54mm)$) {${category} \u2014 ${institution}};`,
+    `\\node[anchor=north west,align=left,text width=0.69\\paperwidth,text=CoverBlue] at ($(current page.north west)+(47mm,-69mm)$) {{\\coverheadingfont\\bfseries\\boldmath\\fontsize{27}{33}\\selectfont ${title}}};`,
+    ...subtitle ? [
+      `\\node[anchor=north west,align=left,text width=0.69\\paperwidth,text=CoverInk] at ($(current page.north west)+(47mm,-94mm)$) {{\\sffamily\\itshape\\boldmath\\fontsize{15}{20}\\selectfont ${subtitle}}};`
+    ] : [],
+    "% A restrained repository/network motif in the center.",
+    "\\begin{scope}[shift={($(current page.center)+(12mm,-12mm)$)}]",
+    "\\foreach \\angle in {0,60,...,300} {",
+    "  \\draw[CoverLine,line width=0.65pt] (\\angle:12mm) -- (\\angle:34mm);",
+    "  \\fill[CoverPlum] (\\angle:34mm) circle (1.35mm);",
+    "}",
+    "\\foreach \\angle in {30,90,...,330} {",
+    "  \\draw[CoverLine,densely dashed,line width=0.45pt] (\\angle:12mm) -- (\\angle:43mm);",
+    "  \\draw[CoverRed,fill=CoverPaper,line width=0.75pt] (\\angle:43mm) circle (1.25mm);",
+    "}",
+    "\\draw[CoverBlue,fill=CoverPaper,line width=1.3pt] (0,0) circle (12mm);",
+    `\\node[align=center,text width=20mm,text=CoverBlue,font=\\coverheadingfont\\bfseries\\fontsize{10.5}{12.5}\\selectfont] at (0,0) {${keyword}};`,
+    `\\node[anchor=north,text=CoverMuted,font=\\sffamily\\fontsize{7.5}{9}\\selectfont] at (0,-49mm) {${institution}};`,
+    "\\end{scope}",
+    "% Bottom metadata block.",
+    "\\draw[CoverInk,line width=0.7pt] ($(current page.south west)+(47mm,70mm)$) -- ($(current page.south east)+(-18mm,70mm)$);",
+    `\\node[anchor=north west,align=left,text width=0.69\\paperwidth,text=CoverInk] at ($(current page.south west)+(47mm,62mm)$) {{\\sffamily\\fontsize{11.5}{16}\\selectfont \\textbf{\u4F5C\u8005\uFF1A} ${author}\\\\\\textbf{\u66F4\u65B0\uFF1A} ${date}\\\\\\textbf{\u7248\u672C\uFF1A} ${version}}};`,
+    "\\end{tikzpicture}",
+    "\\null",
+    "\\end{titlepage}",
+    "\\tableofcontents",
+    "\\clearpage",
+    "```"
+  ].join("\n");
+}
+function formatIsoDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+function formatDateOnly(value) {
+  var _a, _b;
+  const trimmed = value.trim();
+  return (_b = (_a = trimmed.match(/^(\d{4}-\d{2}-\d{2})/)) == null ? void 0 : _a[1]) != null ? _b : trimmed;
+}
+function formatVersion(version) {
+  const trimmed = version == null ? void 0 : version.trim();
+  if (!trimmed) return "";
+  return /^v/i.test(trimmed) ? trimmed : `v${trimmed}`;
+}
+function extractTagLeaf(tag) {
+  var _a, _b;
+  const normalized = tag.trim().replace(/^-\s*/, "").replace(/^#+/, "").replace(/\/+$/, "");
+  const segments = normalized.split("/").filter(Boolean);
+  return (_b = (_a = segments[segments.length - 1]) == null ? void 0 : _a.trim()) != null ? _b : "";
+}
+function escapeLatexPreservingMath(value) {
+  const mathRegex = /(\$\$[^$]+\$\$|\$(?:\\.|[^$\\])+\$)/g;
+  let result = "";
+  let cursor = 0;
+  let match;
+  while ((match = mathRegex.exec(value)) !== null) {
+    result += escapeLatexText(value.slice(cursor, match.index));
+    result += match[0];
+    cursor = mathRegex.lastIndex;
+  }
+  return result + escapeLatexText(value.slice(cursor));
+}
+function escapeLatexText(value) {
+  return value.replace(/\\/g, "\\textbackslash{}").replace(/[&%$#_{}~^]/g, (character) => `\\${character}`);
+}
+
 // src/exporter.ts
 async function exportFile(file, app, settings) {
-  var _a, _b, _c;
+  var _a, _b, _c, _d, _e;
   const vaultPath = getVaultPath(app);
   const tmpDir = getTmpDir(app);
   try {
@@ -1414,7 +1752,8 @@ async function exportFile(file, app, settings) {
       settings.mermaidPath,
       settings.mermaidTheme,
       settings.pageSize,
-      settings.pageMargin
+      settings.pageMargin,
+      settings.defaultFormat === "pdf" && (effectivePdfEngine === "xelatex" || effectivePdfEngine === "lualatex") && settings.headingFont.trim().length > 0
     );
     if (settings.defaultFormat === "pdf") {
       rendered.content = normalizeRemoteImageUrls(rendered.content);
@@ -1440,17 +1779,30 @@ async function exportFile(file, app, settings) {
     const docTitle = (_a = rendered.title) != null ? _a : humanizeFilename(file.basename);
     const docAuthor = (_b = rendered.author) != null ? _b : settings.author || void 0;
     const mtime = ((_c = file.stat) == null ? void 0 : _c.mtime) ? new Date(file.stat.mtime) : /* @__PURE__ */ new Date();
-    const docDate = formatDocDate(mtime, rendered.version);
+    const fallbackModified = formatIsoDate(mtime);
+    const docDate = (_d = rendered.date) != null ? _d : fallbackModified;
+    const modifiedDate = (_e = rendered.modified) != null ? _e : fallbackModified;
+    const metadataDate = rendered.version ? `${docDate} \xB7 v${rendered.version}` : docDate;
     const useRawLatexTitle = isLatexEngine(effectivePdfEngine);
     let finalContent = rendered.content;
     if (useRawLatexTitle) {
-      finalContent = buildLatexTitleBlock(docTitle, docAuthor, docDate) + "\n\n" + rendered.content;
+      finalContent = buildLatexCoverPage({
+        title: docTitle,
+        subtitle: rendered.subtitle,
+        category: rendered.category,
+        tags: rendered.tags,
+        keyword: rendered.keyword,
+        author: docAuthor,
+        institution: rendered.institution,
+        version: rendered.version,
+        date: modifiedDate
+      }) + "\n\n" + rendered.content;
     }
-    const tempMdPath = path5.join(
+    const tempMdPath = path6.join(
       tmpDir,
-      `press-${Date.now()}-${path5.basename(file.path)}`
+      `press-${Date.now()}-${path6.basename(file.path)}`
     );
-    fs4.writeFileSync(tempMdPath, finalContent, "utf8");
+    fs5.writeFileSync(tempMdPath, finalContent, "utf8");
     const pandocOptions = {
       inputPath: tempMdPath,
       outputPath,
@@ -1470,18 +1822,18 @@ async function exportFile(file, app, settings) {
       extraArgs: settings.extraArgs ? settings.extraArgs.split(/\s+/).filter(Boolean) : [],
       docTitle: useRawLatexTitle ? void 0 : docTitle,
       docAuthor: useRawLatexTitle ? void 0 : docAuthor,
-      docDate: useRawLatexTitle ? void 0 : docDate,
+      docDate: useRawLatexTitle ? void 0 : metadataDate,
       figureLabel: rendered.figureLabel
     };
     const result = await exportWithPandoc(pandocOptions);
     try {
-      fs4.unlinkSync(tempMdPath);
+      fs5.unlinkSync(tempMdPath);
     } catch (e) {
     }
     for (const tempFile of rendered.tempFiles) {
       try {
-        if (fs4.existsSync(tempFile)) {
-          fs4.unlinkSync(tempFile);
+        if (fs5.existsSync(tempFile)) {
+          fs5.unlinkSync(tempFile);
         }
       } catch (e) {
       }
@@ -1578,7 +1930,7 @@ async function exportBatch(files, app, settings, onProgress) {
     await Promise.all(promises);
   }
   const vaultPath = getVaultPath(app);
-  const outputDir = path5.isAbsolute(settings.outputDir) ? settings.outputDir : path5.join(vaultPath, settings.outputDir || "pdf");
+  const outputDir = path6.isAbsolute(settings.outputDir) ? settings.outputDir : path6.join(vaultPath, settings.outputDir || "pdf");
   return {
     total,
     success,
@@ -1587,30 +1939,8 @@ async function exportBatch(files, app, settings, onProgress) {
     outputDir
   };
 }
-function buildLatexTitleBlock(title, author, date) {
-  const lines = [
-    "```{=latex}",
-    "\\begin{center}",
-    `{\\LARGE\\bfseries ${escapeLatex(title)}}`
-  ];
-  if (author) {
-    lines.push(`\\\\[0.5em]{\\large ${escapeLatex(author)}}`);
-  }
-  if (date) {
-    lines.push(`\\\\[0.3em]{\\normalsize ${escapeLatex(date)}}`);
-  }
-  lines.push("\\end{center}", "\\vspace{2em}", "\\tableofcontents", "\\clearpage", "```");
-  return lines.join("\n");
-}
-function escapeLatex(text) {
-  return text.replace(/\\/g, "\\textbackslash{}").replace(/[&%$#_{}~^]/g, (c) => `\\${c}`);
-}
 function humanizeFilename(basename3) {
   return basename3.split(/[-_\s]+/).map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
-}
-function formatDocDate(date, version) {
-  const iso = date.toISOString().slice(0, 10);
-  return version ? `${iso} \xB7 v${version}` : iso;
 }
 function collectMarkdownFiles(folder, files) {
   for (const child of folder.children) {
@@ -1666,7 +1996,7 @@ async function localizeImagesForTypst(content, file, vaultPath, tmpDir, tempFile
     }
     replacements.push({
       original: rawPath,
-      converted: `<./${path5.basename(localPath)}>`
+      converted: `<./${path6.basename(localPath)}>`
     });
   }
   let result = content;
@@ -1689,12 +2019,12 @@ async function convertWebpImagesForLatex(content, file, vaultPath, tmpDir, tempF
     if (!resolvedPath) {
       continue;
     }
-    if (resolvedPath.startsWith(path5.join(tmpDir, "remote-webp-"))) {
+    if (resolvedPath.startsWith(path6.join(tmpDir, "remote-webp-"))) {
       tempFiles.push(resolvedPath);
     }
     let outputPath = convertedBySource.get(resolvedPath);
     if (!outputPath) {
-      outputPath = path5.join(
+      outputPath = path6.join(
         tmpDir,
         `webp-${Date.now()}-${index++}.png`
       );
@@ -1765,12 +2095,12 @@ function resolveWebpReference(rawPath, file, vaultPath) {
 function resolveImageReference(rawPath, file, vaultPath) {
   const sourcePath = stripMarkdownUrlDelimiters2(rawPath);
   const decodedPath = stripUrlQueryAndHash(safeDecodeUri(sourcePath));
-  const candidates = path5.isAbsolute(decodedPath) ? [decodedPath] : [
-    path5.join(vaultPath, path5.dirname(file.path), decodedPath),
-    path5.join(vaultPath, decodedPath)
+  const candidates = path6.isAbsolute(decodedPath) ? [decodedPath] : [
+    path6.join(vaultPath, path6.dirname(file.path), decodedPath),
+    path6.join(vaultPath, decodedPath)
   ];
   for (const candidate of candidates) {
-    if (fs4.existsSync(candidate)) {
+    if (fs5.existsSync(candidate)) {
       return candidate;
     }
   }
@@ -1793,24 +2123,24 @@ async function downloadRemoteWebpIfNeeded(rawUrl, tmpDir, index) {
   if (!isUrlWebp && !image.contentType.includes("image/webp") && !isWebpBuffer(image.data)) {
     return null;
   }
-  const outputPath = path5.join(
+  const outputPath = path6.join(
     tmpDir,
     `remote-webp-${Date.now()}-${index}.webp`
   );
-  fs4.writeFileSync(outputPath, image.data);
+  fs5.writeFileSync(outputPath, image.data);
   return outputPath;
 }
 async function downloadRemoteImageForTypst(url, tmpDir, index) {
   try {
     const image = await downloadRemoteImage(url);
     const extension = getImageExtension(url, image.contentType, image.data);
-    const downloadedPath = path5.join(
+    const downloadedPath = path6.join(
       tmpDir,
       `remote-image-${Date.now()}-${index}.${extension}`
     );
-    fs4.writeFileSync(downloadedPath, image.data);
+    fs5.writeFileSync(downloadedPath, image.data);
     if (extension === "webp" || isWebpBuffer(image.data)) {
-      const pngPath = path5.join(
+      const pngPath = path6.join(
         tmpDir,
         `remote-image-${Date.now()}-${index}.png`
       );
@@ -1829,7 +2159,7 @@ async function copyLocalImageForTypst(rawPath, file, vaultPath, tmpDir, index) {
     return null;
   }
   if (isWebpReference(resolvedPath)) {
-    const outputPath2 = path5.join(
+    const outputPath2 = path6.join(
       tmpDir,
       `typst-image-${Date.now()}-${index}.png`
     );
@@ -1837,11 +2167,11 @@ async function copyLocalImageForTypst(rawPath, file, vaultPath, tmpDir, index) {
     return outputPath2;
   }
   const extension = getImageExtensionFromPath(resolvedPath);
-  const outputPath = path5.join(
+  const outputPath = path6.join(
     tmpDir,
     `typst-image-${Date.now()}-${index}.${extension}`
   );
-  fs4.copyFileSync(resolvedPath, outputPath);
+  fs5.copyFileSync(resolvedPath, outputPath);
   return outputPath;
 }
 async function downloadRemoteImage(url) {
@@ -1868,14 +2198,14 @@ function getImageExtension(url, contentType, data) {
   const formatFromQuery = getImageFormatFromQuery(url);
   if (formatFromQuery) return formatFromQuery;
   const pathname = safeUrlPathname(url);
-  const ext = path5.extname(pathname).replace(".", "").toLowerCase();
+  const ext = path6.extname(pathname).replace(".", "").toLowerCase();
   if (["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)) {
     return ext === "jpeg" ? "jpg" : ext;
   }
   return "png";
 }
 function getImageExtensionFromPath(filePath) {
-  const ext = path5.extname(stripUrlQueryAndHash(filePath)).replace(".", "").toLowerCase();
+  const ext = path6.extname(stripUrlQueryAndHash(filePath)).replace(".", "").toLowerCase();
   if (ext === "jpeg") return "jpg";
   if (["png", "jpg", "gif", "svg", "webp"].includes(ext)) return ext;
   return "png";
@@ -1913,11 +2243,11 @@ function isSvgBuffer(data) {
   return data.toString("utf8", 0, Math.min(data.length, 256)).includes("<svg");
 }
 function createMissingImagePlaceholder(tmpDir, index) {
-  const outputPath = path5.join(
+  const outputPath = path6.join(
     tmpDir,
     `remote-image-missing-${Date.now()}-${index}.svg`
   );
-  fs4.writeFileSync(
+  fs5.writeFileSync(
     outputPath,
     `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="160" viewBox="0 0 640 160">
   <rect width="640" height="160" fill="#f6f6f6" stroke="#cccccc"/>
@@ -1959,7 +2289,7 @@ function convertWebpToPng(inputPath, outputPath) {
       stderr += data.toString();
     });
     child.on("close", (code) => {
-      if (code === 0 && fs4.existsSync(outputPath)) {
+      if (code === 0 && fs5.existsSync(outputPath)) {
         resolve();
       } else {
         reject(
@@ -2361,7 +2691,7 @@ ${check.errors.join("\n")}`, 8e3);
   getConfiguredOutputDirectory() {
     const vaultPath = getVaultPath(this.app);
     const outputDir = this.settings.outputDir || "pdf";
-    return path6.isAbsolute(outputDir) ? outputDir : path6.join(vaultPath, outputDir);
+    return path7.isAbsolute(outputDir) ? outputDir : path7.join(vaultPath, outputDir);
   }
   async chooseOutputDirectory() {
     var _a, _b;

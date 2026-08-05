@@ -4,6 +4,15 @@ All notable changes to Press PDF Export are documented here.
 
 This project follows semantic versioning where practical.
 
+## 1.3.0 - 2026-08-05
+
+- Added a frontmatter-driven technical report cover with title, optional subtitle, category, tags, keyword, author, institution, modified date, and version.
+- Added cover defaults for `category: Note`, `keyword: Report`, and `institution: 中国科学院上海天文台`, including correct handling of empty frontmatter fields.
+- Added leaf-only hierarchical tag display, multi-tag support, and date-only formatting for `modified` timestamps.
+- Restyled H2 headings with a blue number tile and light-blue rounded title bar; explicit Markdown numbers are extracted safely, unnumbered headings use a blank tile, and LaTeX math remains supported.
+- Improved page placement for large images to prevent clipping while avoiding unnecessary blank pages.
+- Added automatic sizing guards for ordinary images while preserving Mermaid diagram sizing.
+
 ## 1.2.0 - 2026-08-03
 
 - Fixed local PNG and other Markdown image paths so files resolve relative to the source note, vault root, configured attachment folder, or Obsidian metadata, including images inside embedded notes.

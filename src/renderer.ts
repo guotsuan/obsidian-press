@@ -3,6 +3,7 @@ import * as path from "path";
 import { RenderResult, CalloutType, PageSize } from "./types";
 import { resolveAttachmentPath, getTmpDir } from "./utils";
 import { renderMermaidBlock } from "./mermaid";
+import { getImageNeedspaceFraction } from "./image-layout";
 
 const CALLOUT_TYPES: CalloutType[] = [
   "note",
@@ -50,7 +51,8 @@ export async function renderToPandoc(
   mermaidPath: string,
   mermaidTheme: string,
   pageSize: PageSize = "A4",
-  pageMargin = "25"
+  pageMargin = "25",
+  useLatexH2Layout = false
 ): Promise<RenderResult> {
   const tmpDir = getTmpDir(app);
   const tempFiles: string[] = [];
@@ -88,6 +90,14 @@ export async function renderToPandoc(
   // Step 6: Inline embedded notes ![[other-note]] (limited depth)
   rendered = await inlineNoteEmbeds(rendered, file, app, 0, 5);
 
+  // H2 headings are drawn by LaTeX as a number tile plus a title bar. Extract
+  // an explicit Markdown number here instead of parsing Pandoc's generated
+  // \texorpdfstring in LaTeX (which breaks as soon as the title contains math).
+  // Run after note inlining so headings from embedded notes are covered too.
+  if (useLatexH2Layout) {
+    rendered = markH2HeadingNumbers(rendered);
+  }
+
   // Step 7: Convert remaining wikilinks to standard links
   rendered = convertWikilinks(rendered, file, app);
 
@@ -118,10 +128,30 @@ export async function renderToPandoc(
     content: rendered,
     tempFiles,
     title: fm.title,
+    subtitle: fm.subtitle,
+    category: fm.category,
+    tags: fm.tags,
+    keyword: fm.keyword,
     author: fm.author,
+    institution: fm.institution,
     version: fm.version,
+    date: fm.date,
+    modified: fm.modified,
     figureLabel,
   };
+}
+
+/**
+ * Preserve an explicit H2 number as a raw LaTeX marker for the PDF heading
+ * renderer. Protected code blocks have already been replaced with tokens, so
+ * Markdown examples inside code fences are not modified.
+ */
+export function markH2HeadingNumbers(content: string): string {
+  return content.replace(
+    /^(##)[ \t]+(\d+(?:\.\d+)*)[.．、][ \t]+(.+)$/gm,
+    (_match, hashes: string, number: string, title: string) =>
+      hashes + " \\pressheadingnumber{" + number + "}" + title
+  );
 }
 
 export function formatFlattenedCodeBlocks(content: string): string {
@@ -314,30 +344,88 @@ function restoreCodeSegments(
 interface FrontmatterResult {
   content: string;
   title?: string;
+  subtitle?: string;
+  category?: string;
+  tags?: string[];
+  keyword?: string;
   author?: string;
+  institution?: string;
   version?: string;
+  date?: string;
+  modified?: string;
 }
 
 function stripFrontmatter(content: string): FrontmatterResult {
   const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
   const match = content.match(frontmatterRegex);
 
-  if (!match) return { content };
+  const defaults = {
+    category: "Note",
+    keyword: "Report",
+    institution: "中国科学院上海天文台",
+  };
+
+  if (!match) return { content, ...defaults };
 
   const yaml = match[1];
   const rest = content.slice(match[0].length);
 
   const extract = (key: string): string | undefined => {
-    const m = yaml.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
-    return m ? m[1].replace(/^["']|["']$/g, "").trim() : undefined;
+    const m = yaml.match(new RegExp(`^${key}:[ \\t]*(.*)$`, "m"));
+    const value = m?.[1].replace(/^["']|["']$/g, "").trim();
+    return value || undefined;
+  };
+
+  const extractTags = (): string[] | undefined => {
+    // Use horizontal whitespace here: `\s` would consume the newline after
+    // `tags:` and incorrectly treat the first list item as an inline value.
+    const inlineMatch = yaml.match(/^tags:[ \t]*(.*)$/m);
+    if (!inlineMatch) return undefined;
+
+    const inlineValue = inlineMatch[1].trim();
+    if (inlineValue) {
+      const unwrapped = inlineValue.replace(/^\[|\]$/g, "");
+      const values = unwrapped.includes(",")
+        ? unwrapped.split(",")
+        : [unwrapped];
+      const tags = values.map(cleanYamlValue).filter(Boolean);
+      return tags.length ? tags : undefined;
+    }
+
+    const blockMatch = yaml.match(
+      /^tags:[ \t]*\r?\n((?:[ \t]*-[ \t]*[^\r\n]*(?:\r?\n|$))+)/m
+    );
+    if (!blockMatch) return undefined;
+
+    const tags = blockMatch[1]
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^\s*-\s*/, ""))
+      .map(cleanYamlValue)
+      .filter(Boolean);
+    return tags.length ? tags : undefined;
   };
 
   return {
     content: rest,
     title: extract("title"),
+    subtitle: extract("subtitle"),
+    category: extract("category") || defaults.category,
+    tags: extractTags(),
+    keyword: extract("keyword") || defaults.keyword,
     author: extract("author"),
+    institution: extract("institution") || defaults.institution,
     version: extract("version"),
+    date: extract("date"),
+    modified: extract("modified"),
   };
+}
+
+function cleanYamlValue(value: string): string {
+  return value
+    .trim()
+    .replace(/^-\s*/, "")
+    .replace(/^['"]|['"]$/g, "")
+    .trim();
 }
 
 // === Step 2: Callouts ===
@@ -712,7 +800,12 @@ function applyDefaultImageWidths(
         return `${image}${removeImageMarker(attributes, ".press-mermaid")}`;
       }
       if (!attributes) {
-        return `${image}{width=95%}`;
+        return addLatexLargeImageGuard(
+          `${image}{width=95%}`,
+          pageSize,
+          pageMargin,
+          0.95
+        );
       }
 
       const attributeBody = attributes.slice(1, -1);
@@ -725,18 +818,57 @@ function applyDefaultImageWidths(
           const normalized = attributeBody
             .replace(widthMatch[0], `${widthMatch[0].startsWith(" ") ? " " : ""}width=95%`)
             .trim();
-          return `${image}{${normalized}}`;
+          return addLatexLargeImageGuard(
+            `${image}{${normalized}}`,
+            pageSize,
+            pageMargin,
+            0.95
+          );
         }
         return `${image}${attributes}`;
       }
       if (/(?:^|\s)width\s*=/.test(attributeBody)) {
-        return `${image}${attributes}`;
+        const percentWidth = attributeBody.match(
+          /(?:^|\s)width\s*=\s*"?(\d+(?:\.\d+)?)%"?(?=\s|$)/i
+        );
+        return percentWidth && Number(percentWidth[1]) >= 70
+          ? addLatexLargeImageGuard(
+              `${image}${attributes}`,
+              pageSize,
+              pageMargin,
+              Number(percentWidth[1]) / 100
+            )
+          : `${image}${attributes}`;
       }
 
       const existing = attributeBody.trim();
-      return `${image}{${existing ? existing + " " : ""}width=95%}`;
+      return addLatexLargeImageGuard(
+        `${image}{${existing ? existing + " " : ""}width=95%}`,
+        pageSize,
+        pageMargin,
+        0.95
+      );
     }
   );
+}
+
+/**
+ * Ensure a page has enough vertical room before TeX encounters a large image.
+ * Raw LaTeX is ignored by non-LaTeX writers, so DOCX/HTML output is unchanged.
+ */
+function addLatexLargeImageGuard(
+  image: string,
+  pageSize: PageSize,
+  pageMargin: string,
+  widthFraction: number
+): string {
+  const required = getImageNeedspaceFraction(
+    image,
+    pageSize,
+    pageMargin,
+    widthFraction
+  ).toFixed(3);
+  return `\n\n\`\`\`{=latex}\n\\Needspace{${required}\\textheight}\n\`\`\`\n\n${image}`;
 }
 
 function getDefaultImagePixelWidth(

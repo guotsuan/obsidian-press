@@ -295,6 +295,21 @@ function writeListingsHeader(
   figureLabel?: "图" | "Figure"
 ): void {
   const headerPath = path.join(tempDir, "obsidian-press-listings.tex");
+  const coverContent = String.raw`\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{needspace}
+\usetikzlibrary{calc}
+\definecolor{CoverPaper}{HTML}{F7F8FC}
+\definecolor{CoverBlue}{HTML}{3D6694}
+\definecolor{CoverPlum}{HTML}{6C5874}
+\definecolor{CoverRed}{HTML}{D84A4A}
+\definecolor{CoverLine}{HTML}{C9CBD2}
+\definecolor{CoverInk}{HTML}{17191D}
+\definecolor{CoverMuted}{HTML}{747982}
+\definecolor{HeadingBlue}{HTML}{2F67A0}
+\definecolor{HeadingTint}{HTML}{EDF3F9}
+\providecommand{\coverheadingfont}{\sffamily}
+`;
   const listingsContent = String.raw`\lstset{
   breaklines=true,
   breakatwhitespace=false,
@@ -331,10 +346,49 @@ function writeListingsHeader(
 
     const sizeFormats = [
       `\\titleformat{\\section}{\\headingfont\\fontsize{${h1}pt}{${ls(+h1)}pt}\\selectfont\\bfseries}{\\thesection}{1em}{}`,
-      `\\titleformat{\\subsection}{\\headingfont\\fontsize{${h2}pt}{${ls(+h2)}pt}\\selectfont\\bfseries}{\\thesubsection}{1em}{}`,
+      `\\titleformat{\\subsection}[block]{}{}{0pt}{\\presssubsectionbox}`,
       `\\titleformat{\\subsubsection}{\\headingfont\\fontsize{${h3}pt}{${ls(+h3)}pt}\\selectfont\\bfseries}{\\thesubsubsection}{1em}{}`,
       `\\titleformat{\\paragraph}{\\headingfont\\normalsize\\bfseries}{\\theparagraph}{1em}{}`,
     ].join("\n");
+    const subsectionBox = String.raw`
+\DeclareRobustCommand{\pressheadingnumber}[1]{#1.\space}
+\newcommand{\presscaptureheadingnumber}[1]{\gdef\presscapturedheadingnumber{#1}}
+\newcommand{\presshideheadingnumber}[1]{}
+\newcommand{\presssubsectionbox}[1]{%
+  \begingroup
+  \def\presscapturedheadingnumber{}%
+  \begingroup
+    \let\pressheadingnumber\presscaptureheadingnumber
+    \setbox0=\hbox{#1}%
+  \endgroup
+  \let\pressheadingnumber\presshideheadingnumber
+  \noindent\begin{tikzpicture}[baseline=(pressheadingtitle.base)]
+    \node[
+      fill=HeadingBlue,
+      text=white,
+      rounded corners=2mm,
+      minimum width=15mm,
+      minimum height=11mm,
+      inner sep=0pt,
+      font=\coverheadingfont\fontsize{${h2}pt}{${ls(+h2)}pt}\selectfont\bfseries
+    ] (pressheadingnumber) {\presscapturedheadingnumber};
+    \node[
+      anchor=west,
+      fill=HeadingTint,
+      text=HeadingBlue,
+      rounded corners=2mm,
+      minimum height=11mm,
+      text width=\dimexpr\linewidth-27mm\relax,
+      align=left,
+      inner xsep=4mm,
+      inner ysep=2mm,
+      font=\coverheadingfont\fontsize{${h2}pt}{${ls(+h2)}pt}\selectfont\bfseries\boldmath
+    ] (pressheadingtitle) at ([xshift=3mm]pressheadingnumber.east) {#1};
+  \end{tikzpicture}%
+  \endgroup
+}
+\titlespacing*{\subsection}{0pt}{2.4ex plus 0.8ex minus 0.3ex}{1.5ex plus 0.4ex}
+`;
 
     if (enableCjk) {
       // xeCJK is active: set both the Latin font (via fontspec) and the CJK
@@ -345,6 +399,8 @@ function writeListingsHeader(
 \\newfontfamily\\headinglatinfont{${font}}
 \\setCJKfamilyfont{headcjkfont}{${font}}
 \\newcommand{\\headingfont}{\\headinglatinfont\\CJKfamily{headcjkfont}}
+\\renewcommand{\\coverheadingfont}{\\headingfont}
+${subsectionBox}
 ${sizeFormats}
 `;
     } else {
@@ -353,6 +409,8 @@ ${sizeFormats}
 \\usepackage{fontspec}
 \\usepackage{titlesec}
 \\newfontfamily\\headingfont{${font}}
+\\renewcommand{\\coverheadingfont}{\\headingfont}
+${subsectionBox}
 ${sizeFormats}
 `;
     }
@@ -360,7 +418,7 @@ ${sizeFormats}
 
   fs.writeFileSync(
     headerPath,
-    listingsContent + titlingContent + figureLabelContent + headingContent,
+    coverContent + listingsContent + titlingContent + figureLabelContent + headingContent,
     "utf8"
   );
 }
