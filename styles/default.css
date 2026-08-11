@@ -167,6 +167,31 @@ blockquote p {
 .callout-note { border-color: #448aff; background: #e8f0fe; }
 .callout-note .callout-title { color: #1a73e8; }
 
+.callout-summary {
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #58547d;
+  background: #f2e7db;
+  color: #55527c;
+}
+
+.callout-summary .callout-title {
+  margin: 0;
+  padding: 0.75em 1em;
+  border-bottom: 1px dashed #9eaab2;
+  background: #dddbd5;
+  color: #55527c;
+  font-size: 1.2em;
+}
+
+.callout-summary .callout-body {
+  padding: 0.9em 1.25em 1em;
+}
+
+.callout-summary .callout-body strong {
+  color: #c16d88;
+}
+
 .callout-tip { border-color: #00bfa5; background: #e0f7fa; }
 .callout-tip .callout-title { color: #00897b; }
 

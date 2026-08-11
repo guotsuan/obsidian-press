@@ -203,7 +203,7 @@ export class ObsidianPressSettingTab extends PluginSettingTab {
       )
       .addText((text) =>
         text
-          .setPlaceholder("Stheitisc-medium")
+          .setPlaceholder("Hiragino sans gb")
           .setValue(this.plugin.settings.cjkFont)
           .onChange(async (value) => {
             this.plugin.settings.cjkFont = value;
@@ -226,15 +226,61 @@ export class ObsidianPressSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Heading font")
       .setDesc(
-        "Font for all heading levels (H1–H4). LaTeX engines only (xelatex, lualatex). Leave empty to use the body font."
+        "Font for all heading levels (h1–h4). LaTeX engines only (xelatex, lualatex). Leave empty to use the body font."
       )
       .addText((text) =>
         text
-          .setPlaceholder("STHeitiSC-Medium")
+          .setPlaceholder("Stheitisc-medium")
           .setValue(this.plugin.settings.headingFont)
           .onChange(async (value) => {
             this.plugin.settings.headingFont = value;
             await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Docx body font")
+      .setDesc(
+        "Font for normal text in word exports. Defaults to stsong. The font must be installed on the computer opening the docx."
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("Stsong")
+          .setValue(this.plugin.settings.docxBodyFont)
+          .onChange(async (value) => {
+            this.plugin.settings.docxBodyFont = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Docx heading font")
+      .setDesc(
+        "Font for titles and heading levels in word exports. Defaults to hiragino sans gb."
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("Stheitisc-medium")
+          .setValue(this.plugin.settings.docxHeadingFont)
+          .onChange(async (value) => {
+            this.plugin.settings.docxHeadingFont = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Docx line spacing")
+      .setDesc("Line spacing multiplier for word exports. Defaults to 1.5.")
+      .addText((text) =>
+        text
+          .setPlaceholder("1.5")
+          .setValue(String(this.plugin.settings.docxLineSpacing))
+          .onChange(async (value) => {
+            const spacing = Number.parseFloat(value);
+            if (Number.isFinite(spacing) && spacing >= 1 && spacing <= 3) {
+              this.plugin.settings.docxLineSpacing = spacing;
+              await this.plugin.saveSettings();
+            }
           })
       );
 

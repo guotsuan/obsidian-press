@@ -47,6 +47,11 @@ export interface PluginSettings {
   // Heading font
   headingFont: string;
 
+  // DOCX fonts
+  docxBodyFont: string;
+  docxHeadingFont: string;
+  docxLineSpacing: number;
+
   // Document metadata
   author: string;
 
@@ -79,6 +84,9 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   cjkFont: "",
   enableCjk: true,
   headingFont: "STHeitiSC-Medium",
+  docxBodyFont: "STSong",
+  docxHeadingFont: "Hiragino Sans GB",
+  docxLineSpacing: 1.5,
   author: "",
   mermaidPath: "mmdc",
   mermaidTheme: "default",
@@ -110,6 +118,11 @@ export interface PandocOptions {
   cjkFont: string;
   enableCjk: boolean;
   headingFont: string;
+  docxBodyFont: string;
+  docxHeadingFont: string;
+  docxLineSpacing: number;
+  docxReferencePath?: string;
+  docxTocTitle?: string;
   customCssPath?: string;
   customTemplatePath?: string;
   extraArgs: string[];
@@ -139,6 +152,7 @@ export interface RenderResult {
 
 export type CalloutType =
   | "note"
+  | "summary"
   | "tip"
   | "important"
   | "warning"

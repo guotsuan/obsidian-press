@@ -7,6 +7,7 @@ import { getImageNeedspaceFraction } from "./image-layout";
 
 const CALLOUT_TYPES: CalloutType[] = [
   "note",
+  "summary",
   "tip",
   "important",
   "warning",
@@ -25,6 +26,7 @@ const CALLOUT_TYPES: CalloutType[] = [
 
 const CALLOUT_ICONS: Record<string, string> = {
   note: "\u{1F4DD}",
+  summary: "\u{1F4CB}",
   tip: "\u{1F4A1}",
   important: "\u{2757}",
   warning: "\u{26A0}\u{FE0F}",
@@ -41,6 +43,24 @@ const CALLOUT_ICONS: Record<string, string> = {
   bug: "\u{1F41B}",
 };
 
+const CALLOUT_ALIASES: Record<string, CalloutType> = {
+  tldr: "summary",
+  hint: "tip",
+  check: "success",
+  done: "success",
+  help: "question",
+  faq: "question",
+  fail: "failure",
+  missing: "failure",
+  error: "danger",
+  attention: "warning",
+  cite: "quote",
+};
+
+function isCalloutType(value: string): value is CalloutType {
+  return CALLOUT_TYPES.some((type) => type === value);
+}
+
 /**
  * Full preprocessing pipeline: Obsidian Markdown → Pandoc-compatible Markdown
  */
@@ -52,7 +72,8 @@ export async function renderToPandoc(
   mermaidTheme: string,
   pageSize: PageSize = "A4",
   pageMargin = "25",
-  useLatexH2Layout = false
+  useLatexH2Layout = false,
+  useLatexCallouts = false
 ): Promise<RenderResult> {
   const tmpDir = getTmpDir(app);
   const tempFiles: string[] = [];
@@ -79,8 +100,13 @@ export async function renderToPandoc(
   const protectedCode = protectCodeSegments(rendered);
   rendered = protectedCode.content;
 
+  // Pandoc's DOCX math writer cannot convert deprecated TeX font switches
+  // such as {\rm text}; normalize them to modern math commands before the
+  // document reaches any output engine. Code examples are already protected.
+  rendered = normalizeLegacyMathCommands(rendered);
+
   // Step 4: Convert callouts
-  rendered = convertCallouts(rendered);
+  rendered = convertCallouts(rendered, useLatexCallouts);
 
   // Step 5: Resolve images before wikilinks. Otherwise ![[img.png]] is
   // partially consumed by the generic [[wikilink]] conversion.
@@ -139,6 +165,31 @@ export async function renderToPandoc(
     modified: fm.modified,
     figureLabel,
   };
+}
+
+export function normalizeLegacyMathCommands(content: string): string {
+  const commands: Record<string, string> = {
+    rm: "mathrm",
+    bf: "mathbf",
+    it: "mathit",
+    sf: "mathsf",
+    tt: "mathtt",
+  };
+  const normalizeMath = (math: string): string =>
+    math.replace(
+      /\{\\(rm|bf|it|sf|tt)\s+/g,
+      (_match, command: string) => `\\${commands[command]}{`
+    );
+
+  // Process display math first, then inline math. The second pass is
+  // idempotent for already-normalized display blocks.
+  return content
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_match, math: string) =>
+      `$$${normalizeMath(math)}$$`
+    )
+    .replace(/\$([^$\n]+)\$/g, (_match, math: string) =>
+      `$${normalizeMath(math)}$`
+    );
 }
 
 /**
@@ -430,7 +481,7 @@ function cleanYamlValue(value: string): string {
 
 // === Step 2: Callouts ===
 
-function convertCallouts(content: string): string {
+function convertCallouts(content: string, useLatex = false): string {
   // Match callout blocks: > [!type] Title\n> content...
   const calloutRegex =
     /^(>\s*\[!([a-zA-Z]+)\](\+|-)?\s*(.*)?\n(?:>\s*.*\n?)*)/gm;
@@ -444,9 +495,9 @@ function convertCallouts(content: string): string {
       _collapse: string | undefined,
       title: string | undefined
     ) => {
-      const calloutType = type.toLowerCase() as CalloutType;
-      const isValidType = CALLOUT_TYPES.includes(calloutType);
-      const cssType = isValidType ? calloutType : "note";
+      const rawType = type.toLowerCase();
+      const cssType =
+        CALLOUT_ALIASES[rawType] || (isCalloutType(rawType) ? rawType : "note");
       const icon = CALLOUT_ICONS[cssType] || "\u{1F4DD}";
       const displayTitle = (title || cssType).trim();
 
@@ -462,9 +513,18 @@ function convertCallouts(content: string): string {
 
       const body = bodyLines.join("\n").trim();
 
+      if (useLatex) {
+        const pandocTitle = escapePandocAttribute(displayTitle);
+        return `::: {.callout .callout-${cssType} callout-type="${cssType}" callout-title="${pandocTitle}"}\n\n${body}\n\n:::`;
+      }
+
       return `<div class="callout callout-${cssType}">\n<div class="callout-title">\n${icon} ${displayTitle}\n</div>\n<div class="callout-body">\n\n${body}\n\n</div>\n</div>`;
     }
   );
+}
+
+function escapePandocAttribute(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 // === Step 3: WikiLinks ===

@@ -237,6 +237,14 @@ Access via **Command Palette** (`Cmd/Ctrl + P`) or the ribbon icon (file output 
 | Heading font | `STHeitiSC-Medium` | Font for H1–H4 headings in LaTeX PDF exports. Sizes scale proportionally with the base font size (1.80×, 1.55×, 1.33×, 1.00×); H2 is rendered as a blue number tile plus a light-blue title bar. Leave empty to use the body font. XeLaTeX and LuaLaTeX only |
 | CJK font | (auto-detect) | Chinese/Japanese/Korean font. On macOS, XeLaTeX falls back to `STHeitiSC-Medium` when this is empty |
 | Enable CJK support | On | CJK font config for LaTeX |
+| DOCX body font | `STSong` | Font used by normal text in Word exports. The font must be installed on the computer opening the DOCX |
+| DOCX heading font | `Hiragino Sans GB` | Font used by titles and heading levels in Word exports |
+| DOCX line spacing | `1.5` | Line spacing multiplier written into the default Word paragraph style |
+
+DOCX exports place the document title before the table of contents. The table
+of contents is titled `目录` when the note contains CJK text and `Contents`
+otherwise. The document body always starts on a new page after the table of
+contents.
 
 ### Advanced
 
@@ -317,7 +325,7 @@ PDF export is powered by Pandoc engines. XeLaTeX is the recommended default for 
 
 | Obsidian Syntax | Output |
 |----------------|--------|
-| `> [!note] Title` callouts | Styled `<div>` blocks with icons and colors |
+| `> [!note] Title` callouts | Type-specific boxes for note, summary, tip, important, warning, caution, abstract, info, todo, example, quote, success, question, failure, danger, and bug |
 | `[[wikilink]]` | Standard Markdown links |
 | `![[image.png]]` embeds | Absolute path image references |
 | `![caption](images/image.png)` | Local image paths resolved from the note or attachment directory |
@@ -334,6 +342,11 @@ PDF export is powered by Pandoc engines. XeLaTeX is the recommended default for 
 | LaTeX math (`$...$`, `$$...$$`) | Native Pandoc math rendering |
 | Pipe/grid tables | Native Pandoc table support |
 | Images with `\|size` | Resized image tags |
+
+Legacy TeX font switches inside math, such as `{\rm row}` and
+`{\bf x}`, are normalized to `\mathrm{row}` and `\mathbf{x}` so
+DOCX exports remain editable Word equations instead of falling back to literal
+TeX source.
 
 ### Image sizing and captions
 

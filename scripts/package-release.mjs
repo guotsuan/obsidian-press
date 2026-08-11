@@ -26,7 +26,7 @@ const entry = {
   name: manifest.name,
   author: manifest.author,
   description: manifest.description,
-  repo: "TaylorChen/obsidian-press",
+  repo: "guotsuan/obsidian-press",
 };
 
 await writeFile(

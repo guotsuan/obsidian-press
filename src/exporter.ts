@@ -14,6 +14,10 @@ import {
   checkCommandExists,
 } from "./utils";
 
+const DOCX_BODY_PAGE_BREAK = `\`\`\`{=openxml}
+<w:p><w:r><w:br w:type="page"/></w:r></w:p>
+\`\`\``;
+
 // === Single file export ===
 
 export async function exportFile(
@@ -55,7 +59,8 @@ export async function exportFile(
       settings.pageMargin,
       settings.defaultFormat === "pdf" &&
         (effectivePdfEngine === "xelatex" || effectivePdfEngine === "lualatex") &&
-        settings.headingFont.trim().length > 0
+        settings.headingFont.trim().length > 0,
+      settings.defaultFormat === "pdf" && isLatexEngine(effectivePdfEngine)
     );
 
     if (settings.defaultFormat === "pdf") {
@@ -96,7 +101,8 @@ export async function exportFile(
     // For LaTeX engines inject a standalone graphic cover and move the TOC to
     // page two. Other formats continue to receive Pandoc document metadata.
     // For HTML/DOCX engines pass title/author/date as pandoc --metadata args.
-    const useRawLatexTitle = isLatexEngine(effectivePdfEngine);
+    const useRawLatexTitle =
+      settings.defaultFormat === "pdf" && isLatexEngine(effectivePdfEngine);
     let finalContent = rendered.content;
     if (useRawLatexTitle) {
       finalContent =
@@ -113,6 +119,12 @@ export async function exportFile(
         }) +
         "\n\n" +
         rendered.content;
+    }
+    if (settings.defaultFormat === "docx") {
+      // Pandoc writes metadata title and the generated TOC before document
+      // blocks. Making the first block a native Word page break therefore
+      // keeps the title before the TOC and starts the body on a new page.
+      finalContent = DOCX_BODY_PAGE_BREAK + "\n\n" + finalContent;
     }
 
     // Write processed content to temp file
@@ -137,6 +149,15 @@ export async function exportFile(
       cjkFont: settings.cjkFont,
       enableCjk: settings.enableCjk,
       headingFont: settings.headingFont,
+      docxBodyFont: settings.docxBodyFont,
+      docxHeadingFont: settings.docxHeadingFont,
+      docxLineSpacing: settings.docxLineSpacing,
+      docxTocTitle:
+        settings.defaultFormat === "docx"
+          ? containsCjk(content)
+            ? "目录"
+            : "Contents"
+          : undefined,
       customCssPath: settings.customCssPath || undefined,
       customTemplatePath: settings.customTemplatePath || undefined,
       extraArgs: settings.extraArgs

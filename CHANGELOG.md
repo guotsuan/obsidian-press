@@ -4,6 +4,15 @@ All notable changes to Press PDF Export are documented here.
 
 This project follows semantic versioning where practical.
 
+## 1.4.0 - 2026-08-11
+
+- Added native, type-specific PDF callouts for note, summary, tip, important, warning, caution, abstract, info, todo, example, quote, success, question, failure, danger, and bug, including common Obsidian aliases.
+- Added configurable DOCX body and heading fonts through dynamically generated Word reference styles, with `STSong` and `Hiragino Sans GB` defaults.
+- Added configurable DOCX line spacing with a 1.5× default.
+- Improved DOCX layout so the document title precedes a localized table of contents (`目录` for CJK notes and `Contents` otherwise), followed by a page break before the body.
+- Preserved editable Word equations for dollar-delimited LaTeX math and normalized legacy TeX font switches for DOCX compatibility.
+- Fixed DOCX and HTML exports incorrectly receiving LaTeX-only title and PDF-engine options.
+
 ## 1.3.0 - 2026-08-05
 
 - Added a frontmatter-driven technical report cover with title, optional subtitle, category, tags, keyword, author, institution, modified date, and version.
