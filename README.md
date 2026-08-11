@@ -6,7 +6,7 @@ Press PDF Export converts Obsidian Markdown into Pandoc-compatible Markdown, the
 
 ## Status
 
-- Version: `1.0.0`
+- Version: `1.4.0`
 - License: MIT
 - Obsidian: desktop app only
 - Minimum Obsidian version: `1.8.7`
