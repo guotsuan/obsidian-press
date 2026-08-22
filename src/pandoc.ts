@@ -13,6 +13,8 @@ function buildPandocArgs(options: PandocOptions): string[] {
     format,
     engine,
     fontSize,
+    pdfLineSpacing,
+    pdfColorScheme,
     pageSize,
     pageMargin,
     codeTheme,
@@ -24,6 +26,25 @@ function buildPandocArgs(options: PandocOptions): string[] {
   } = options;
   const listingsHeaderPath = path.join(options.tempDir, "obsidian-press-listings.tex");
   const calloutFilterPath = path.join(options.tempDir, "obsidian-press-callouts.lua");
+  const pdfThemeCssPath = path.join(
+    options.tempDir,
+    "obsidian-press-pdf-theme.css"
+  );
+  const normalizedPdfLineSpacing = normalizeLineSpacing(pdfLineSpacing);
+  const useGrayscale = pdfColorScheme === "grayscale";
+  const effectiveCodeTheme = useGrayscale ? "monochrome" : codeTheme;
+  const latexLinkColorArgs = useGrayscale
+    ? [
+        "-V",
+        "colorlinks=true",
+        "-V",
+        "linkcolor=black",
+        "-V",
+        "urlcolor=black",
+        "-V",
+        "citecolor=black",
+      ]
+    : ["-V", "colorlinks=true"];
 
   const args: string[] = [
     inputPath,
@@ -41,7 +62,7 @@ function buildPandocArgs(options: PandocOptions): string[] {
     ...(format === "pdf" && ["xelatex","lualatex","pdflatex"].includes(engine)
       ? []
       : ["--toc", "--toc-depth=3"]),
-    `--highlight-style=${codeTheme}`,
+    `--highlight-style=${effectiveCodeTheme}`,
     "--resource-path",
     path.dirname(inputPath),
   ];
@@ -54,6 +75,8 @@ function buildPandocArgs(options: PandocOptions): string[] {
     `fontsize=${fontSize}pt`,
     "-V",
     `papersize=${pageSize.toLowerCase()}`,
+    "-V",
+    `linestretch=${normalizedPdfLineSpacing}`,
   ];
 
   if (format === "pdf") switch (engine) {
@@ -66,8 +89,7 @@ function buildPandocArgs(options: PandocOptions): string[] {
         listingsHeaderPath,
         ...latexBase,
         ...getCjkArgs(engine, enableCjk, cjkFont),
-        "-V",
-        "colorlinks=true"
+        ...latexLinkColorArgs
       );
       break;
     case "pdflatex":
@@ -78,8 +100,7 @@ function buildPandocArgs(options: PandocOptions): string[] {
         "-H",
         listingsHeaderPath,
         ...latexBase,
-        "-V",
-        "colorlinks=true"
+        ...latexLinkColorArgs
       );
       break;
     case "lualatex":
@@ -91,8 +112,7 @@ function buildPandocArgs(options: PandocOptions): string[] {
         listingsHeaderPath,
         ...latexBase,
         ...getCjkArgs(engine, enableCjk, cjkFont),
-        "-V",
-        "colorlinks=true"
+        ...latexLinkColorArgs
       );
       break;
     case "wkhtmltopdf":
@@ -117,16 +137,28 @@ function buildPandocArgs(options: PandocOptions): string[] {
         "-V",
         `font-size=${fontSize}pt`,
         "-V",
-        `page-size=${pageSize.toLowerCase()}`
+        `page-size=${pageSize.toLowerCase()}`,
+        "-V",
+        `linestretch=${normalizedPdfLineSpacing}`
       );
+      if (useGrayscale) {
+        args.push(
+          "-V",
+          "linkcolor=black",
+          "-V",
+          "citecolor=black",
+          "-V",
+          "filecolor=black"
+        );
+      }
       break;
   }
 
   if (format === "docx" && options.docxReferencePath) {
     args.push(`--reference-doc=${options.docxReferencePath}`);
   }
-  if (format === "docx" && options.docxTocTitle) {
-    args.push("--metadata", `toc-title=${options.docxTocTitle}`);
+  if (options.tocTitle) {
+    args.push("--metadata", `toc-title=${options.tocTitle}`);
   }
 
   // CSS for HTML-based engines
@@ -135,6 +167,13 @@ function buildPandocArgs(options: PandocOptions): string[] {
     customCssPath
   ) {
     args.push("--css", customCssPath);
+  }
+  if (
+    format === "pdf" &&
+    (engine === "wkhtmltopdf" || engine === "weasyprint")
+  ) {
+    // Append after custom CSS so the explicit PDF setting has precedence.
+    args.push("--css", pdfThemeCssPath);
   }
 
   // Template
@@ -152,10 +191,10 @@ function buildPandocArgs(options: PandocOptions): string[] {
   if (options.docDate) {
     args.push("--metadata", `date=${options.docDate}`);
   }
-  if (engine === "typst" && options.figureLabel) {
+  if (engine === "typst" && options.tocTitle) {
     args.push(
       "--metadata",
-      `lang=${options.figureLabel === "图" ? "zh" : "en"}`
+      `lang=${options.tocTitle === "目录" ? "zh" : "en"}`
     );
   }
 
@@ -226,9 +265,17 @@ export async function exportWithPandoc(
     options.headingFont,
     options.enableCjk,
     options.fontSize,
+    options.pdfColorScheme,
     options.figureLabel
   );
   writeCalloutFilter(options.tempDir);
+  if (options.format === "pdf") {
+    writePdfThemeCss(
+      options.tempDir,
+      options.pdfLineSpacing,
+      options.pdfColorScheme
+    );
+  }
   let resolvedOptions = options;
   if (
     options.format === "docx" &&
@@ -319,6 +366,77 @@ export async function exportWithPandoc(
       });
     });
   });
+}
+
+function writePdfThemeCss(
+  tempDir: string,
+  multiplier: number,
+  colorScheme: PandocOptions["pdfColorScheme"]
+): void {
+  const spacing = normalizeLineSpacing(multiplier);
+  const cssPath = path.join(tempDir, "obsidian-press-pdf-theme.css");
+  const grayscaleCss =
+    colorScheme === "grayscale"
+      ? String.raw`
+:root {
+  --text-color: #1f2224;
+  --border-color: #c9ccce;
+  --accent-color: #454a4f;
+  --code-bg: #f2f3f3;
+}
+a, a:visited { color: #33373a !important; }
+h1 { border-color: #454a4f !important; }
+h2 { border-color: #b7bbbe !important; }
+blockquote {
+  border-color: #666b6f !important;
+  background: #f3f3f2 !important;
+  color: #404447 !important;
+}
+mark { background: #dfe1e2 !important; color: #202224 !important; }
+pre, code, .sourceCode {
+  background: #f2f3f3 !important;
+  border-color: #c9ccce !important;
+}
+.sourceCode span { color: #25282a !important; }
+.callout {
+  border-color: #6c7175 !important;
+  background: #f1f2f2 !important;
+  color: #363a3d !important;
+}
+.callout-title { color: #3f4448 !important; }
+.callout-summary {
+  border-color: #555a5f !important;
+  background: #f0f1f1 !important;
+  color: #383c40 !important;
+}
+.callout-summary .callout-title {
+  border-color: #9ea2a5 !important;
+  background: #d9dcde !important;
+  color: #383c40 !important;
+}
+.callout-summary .callout-body strong { color: #454a4f !important; }
+.callout-important, .callout-example,
+.callout-warning, .callout-question {
+  border-color: #595e63 !important;
+  background: #edeeee !important;
+}
+.callout-caution, .callout-failure,
+.callout-danger, .callout-bug {
+  border-color: #484d51 !important;
+  background: #e9ebec !important;
+}
+`
+      : "";
+  fs.writeFileSync(
+    cssPath,
+    `body { line-height: ${spacing} !important; }\n${grayscaleCss}`,
+    "utf8"
+  );
+}
+
+function normalizeLineSpacing(multiplier: number): number {
+  if (!Number.isFinite(multiplier)) return 1.5;
+  return Math.min(3, Math.max(1, multiplier));
 }
 
 async function writeDocxReference(options: PandocOptions): Promise<string> {
@@ -521,21 +639,39 @@ end
   fs.writeFileSync(filterPath, filter, "utf8");
 }
 
-function writeListingsHeader(
-  tempDir: string,
-  engine: string,
-  headingFont: string,
-  enableCjk: boolean,
-  fontSize: number,
-  figureLabel?: "图" | "Figure"
-): void {
-  const headerPath = path.join(tempDir, "obsidian-press-listings.tex");
-  const coverContent = String.raw`\usepackage{xcolor}
-\usepackage{tikz}
-\usepackage{needspace}
-\usepackage[most]{tcolorbox}
-\usetikzlibrary{calc}
-\definecolor{CoverPaper}{HTML}{F7F8FC}
+function getLatexThemeColors(
+  colorScheme: PandocOptions["pdfColorScheme"]
+): string {
+  if (colorScheme === "grayscale") {
+    return String.raw`\definecolor{CoverPaper}{HTML}{F6F6F4}
+\definecolor{CoverBlue}{HTML}{44484C}
+\definecolor{CoverPlum}{HTML}{62666A}
+\definecolor{CoverRed}{HTML}{4E5154}
+\definecolor{CoverLine}{HTML}{C8CBCC}
+\definecolor{CoverInk}{HTML}{171819}
+\definecolor{CoverMuted}{HTML}{707477}
+\definecolor{HeadingBlue}{HTML}{41464B}
+\definecolor{HeadingTint}{HTML}{EDEEEF}
+\pressdefinecalloutpalette{note}{7A7F84}{E2E4E5}{F3F4F4}{44494E}{3B3E41}
+\pressdefinecalloutpalette{summary}{555A5F}{D9DCDE}{F0F1F1}{454A4F}{383C40}
+\pressdefinecalloutpalette{tip}{777C80}{E1E3E4}{F4F4F3}{494E52}{3C4043}
+\pressdefinecalloutpalette{important}{5E6368}{DADCDD}{EFEFF0}{3E4347}{383C40}
+\pressdefinecalloutpalette{warning}{666B70}{DCDEDF}{F1F1F0}{41464A}{3A3E41}
+\pressdefinecalloutpalette{caution}{50555A}{D5D8DA}{EDEEEF}{353A3E}{35393C}
+\pressdefinecalloutpalette{abstract}{73787D}{E0E2E3}{F2F3F3}{454A4E}{3A3E42}
+\pressdefinecalloutpalette{info}{7A7F84}{E2E4E5}{F3F4F4}{44494E}{3B3E41}
+\pressdefinecalloutpalette{todo}{7A7F84}{E2E4E5}{F3F4F4}{44494E}{3B3E41}
+\pressdefinecalloutpalette{example}{5E6368}{DADCDD}{EFEFF0}{3E4347}{383C40}
+\pressdefinecalloutpalette{quote}{8A8E91}{E7E8E8}{FAFAFA}{555A5E}{444648}
+\pressdefinecalloutpalette{success}{72777B}{E0E2E3}{F3F4F3}{454A4E}{3B3F42}
+\pressdefinecalloutpalette{question}{666B70}{DCDEDF}{F1F1F0}{41464A}{3A3E41}
+\pressdefinecalloutpalette{failure}{50555A}{D5D8DA}{EDEEEF}{353A3E}{35393C}
+\pressdefinecalloutpalette{danger}{484D51}{D2D5D7}{E9EBEC}{303539}{323638}
+\pressdefinecalloutpalette{bug}{50555A}{D5D8DA}{EDEEEF}{353A3E}{35393C}
+\definecolor{CalloutDash}{HTML}{9EA2A5}`;
+  }
+
+  return String.raw`\definecolor{CoverPaper}{HTML}{F7F8FC}
 \definecolor{CoverBlue}{HTML}{3D6694}
 \definecolor{CoverPlum}{HTML}{6C5874}
 \definecolor{CoverRed}{HTML}{D84A4A}
@@ -544,13 +680,6 @@ function writeListingsHeader(
 \definecolor{CoverMuted}{HTML}{747982}
 \definecolor{HeadingBlue}{HTML}{2F67A0}
 \definecolor{HeadingTint}{HTML}{EDF3F9}
-\newcommand{\pressdefinecalloutpalette}[6]{%
-  \definecolor{CalloutFrame#1}{HTML}{#2}%
-  \definecolor{CalloutTitle#1}{HTML}{#3}%
-  \definecolor{CalloutBody#1}{HTML}{#4}%
-  \definecolor{CalloutAccent#1}{HTML}{#5}%
-  \definecolor{CalloutInk#1}{HTML}{#6}%
-}
 \pressdefinecalloutpalette{note}{448AFF}{DCE8FC}{E8F0FE}{1A73E8}{3F4650}
 \pressdefinecalloutpalette{summary}{58547D}{DDDBD5}{F2E7DB}{C16D88}{55527C}
 \pressdefinecalloutpalette{tip}{00BFA5}{C9F0EA}{E0F7FA}{00897B}{344B4A}
@@ -567,7 +696,33 @@ function writeListingsHeader(
 \pressdefinecalloutpalette{failure}{FF1744}{F7CCD6}{FCE4EC}{C62828}{584047}
 \pressdefinecalloutpalette{danger}{D50000}{F7C9C9}{FFEBEE}{B71C1C}{594040}
 \pressdefinecalloutpalette{bug}{F44336}{F5D0C8}{FBE9E7}{BF360C}{59423E}
-\definecolor{CalloutDash}{HTML}{9EAAB2}
+\definecolor{CalloutDash}{HTML}{9EAAB2}`;
+}
+
+function writeListingsHeader(
+  tempDir: string,
+  engine: string,
+  headingFont: string,
+  enableCjk: boolean,
+  fontSize: number,
+  pdfColorScheme: PandocOptions["pdfColorScheme"],
+  figureLabel?: "图" | "Figure"
+): void {
+  const headerPath = path.join(tempDir, "obsidian-press-listings.tex");
+  const themeColors = getLatexThemeColors(pdfColorScheme);
+  const coverContent = String.raw`\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{needspace}
+\usepackage[most]{tcolorbox}
+\usetikzlibrary{calc}
+\newcommand{\pressdefinecalloutpalette}[6]{%
+  \definecolor{CalloutFrame#1}{HTML}{#2}%
+  \definecolor{CalloutTitle#1}{HTML}{#3}%
+  \definecolor{CalloutBody#1}{HTML}{#4}%
+  \definecolor{CalloutAccent#1}{HTML}{#5}%
+  \definecolor{CalloutInk#1}{HTML}{#6}%
+}
+${themeColors}
 \providecommand{\coverheadingfont}{\sffamily}
 \newcommand{\presscalloutbold}[1]{{\color{CalloutAccent\presscallouttype}\bfseries #1}}
 \newcommand{\pressclipboardicon}{%

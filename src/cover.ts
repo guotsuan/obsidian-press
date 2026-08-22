@@ -8,6 +8,7 @@ export interface CoverMetadata {
   institution?: string;
   version?: string;
   date: string;
+  tocTitle: "目录" | "Contents";
 }
 
 /** Build a clean technical-report cover and put the TOC on page two. */
@@ -77,6 +78,7 @@ export function buildLatexCoverPage(metadata: CoverMetadata): string {
     "\\end{tikzpicture}",
     "\\null",
     "\\end{titlepage}",
+    `\\renewcommand{\\contentsname}{${escapeLatexText(metadata.tocTitle)}}`,
     "\\tableofcontents",
     "\\clearpage",
     "```",

@@ -100,7 +100,7 @@
 
   $if(toc)$
   <nav id="TOC">
-    <h2>Table of Contents</h2>
+    <h2>$if(toc-title)$$toc-title$$else$Contents$endif$</h2>
     $table-of-contents$
   </nav>
   $endif$

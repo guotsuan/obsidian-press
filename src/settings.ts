@@ -2,6 +2,7 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import ObsidianPressPlugin from "./main";
 import {
   PdfEngine,
+  PdfColorScheme,
   PageSize,
   CodeTheme,
   MermaidTheme,
@@ -146,6 +147,38 @@ export class ObsidianPressSettingTab extends PluginSettingTab {
               this.plugin.settings.fontSize = num;
               await this.plugin.saveSettings();
             }
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("PDF line spacing")
+      .setDesc("Line spacing multiplier for PDF exports. Defaults to 1.5.")
+      .addText((text) =>
+        text
+          .setPlaceholder("1.5")
+          .setValue(String(this.plugin.settings.pdfLineSpacing))
+          .onChange(async (value) => {
+            const spacing = Number.parseFloat(value);
+            if (Number.isFinite(spacing) && spacing >= 1 && spacing <= 3) {
+              this.plugin.settings.pdfLineSpacing = spacing;
+              await this.plugin.saveSettings();
+            }
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("PDF color scheme")
+      .setDesc(
+        "Color theme used only for PDF exports. Formal grayscale uses neutral tones for headings, callouts, links, and code."
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("color", "Current color (default)")
+          .addOption("grayscale", "Formal grayscale")
+          .setValue(this.plugin.settings.pdfColorScheme)
+          .onChange(async (value: string) => {
+            this.plugin.settings.pdfColorScheme = value as PdfColorScheme;
+            await this.plugin.saveSettings();
           })
       );
 

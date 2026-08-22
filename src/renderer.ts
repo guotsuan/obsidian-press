@@ -199,7 +199,7 @@ export function normalizeLegacyMathCommands(content: string): string {
  */
 export function markH2HeadingNumbers(content: string): string {
   return content.replace(
-    /^(##)[ \t]+(\d+(?:\.\d+)*)[.．、][ \t]+(.+)$/gm,
+    /^(##)[ \t]+(\d+(?:\.\d+)*)(?:[.．、][ \t]*|[ \t]+)(\S.*)$/gm,
     (_match, hashes: string, number: string, title: string) =>
       hashes + " \\pressheadingnumber{" + number + "}" + title
   );

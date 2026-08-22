@@ -53,6 +53,8 @@ var DEFAULT_SETTINGS = {
   customCssPath: "",
   customTemplatePath: "",
   fontSize: 11,
+  pdfLineSpacing: 1.5,
+  pdfColorScheme: "color",
   pageSize: "A4",
   pageMargin: "25",
   codeTheme: "tango",
@@ -136,6 +138,23 @@ var ObsidianPressSettingTab = class extends import_obsidian.PluginSettingTab {
           this.plugin.settings.fontSize = num;
           await this.plugin.saveSettings();
         }
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("PDF line spacing").setDesc("Line spacing multiplier for PDF exports. Defaults to 1.5.").addText(
+      (text) => text.setPlaceholder("1.5").setValue(String(this.plugin.settings.pdfLineSpacing)).onChange(async (value) => {
+        const spacing = Number.parseFloat(value);
+        if (Number.isFinite(spacing) && spacing >= 1 && spacing <= 3) {
+          this.plugin.settings.pdfLineSpacing = spacing;
+          await this.plugin.saveSettings();
+        }
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("PDF color scheme").setDesc(
+      "Color theme used only for PDF exports. Formal grayscale uses neutral tones for headings, callouts, links, and code."
+    ).addDropdown(
+      (dropdown) => dropdown.addOption("color", "Current color (default)").addOption("grayscale", "Formal grayscale").setValue(this.plugin.settings.pdfColorScheme).onChange(async (value) => {
+        this.plugin.settings.pdfColorScheme = value;
+        await this.plugin.saveSettings();
       })
     );
     new import_obsidian.Setting(containerEl).setName("Page size").setDesc("PDF page dimensions").addDropdown(
@@ -700,7 +719,7 @@ function normalizeLegacyMathCommands(content) {
 }
 function markH2HeadingNumbers(content) {
   return content.replace(
-    /^(##)[ \t]+(\d+(?:\.\d+)*)[.．、][ \t]+(.+)$/gm,
+    /^(##)[ \t]+(\d+(?:\.\d+)*)(?:[.．、][ \t]*|[ \t]+)(\S.*)$/gm,
     (_match, hashes, number, title) => hashes + " \\pressheadingnumber{" + number + "}" + title
   );
 }
@@ -2283,6 +2302,8 @@ function buildPandocArgs(options) {
     format,
     engine,
     fontSize,
+    pdfLineSpacing,
+    pdfColorScheme,
     pageSize,
     pageMargin,
     codeTheme,
@@ -2294,6 +2315,23 @@ function buildPandocArgs(options) {
   } = options;
   const listingsHeaderPath = path5.join(options.tempDir, "obsidian-press-listings.tex");
   const calloutFilterPath = path5.join(options.tempDir, "obsidian-press-callouts.lua");
+  const pdfThemeCssPath = path5.join(
+    options.tempDir,
+    "obsidian-press-pdf-theme.css"
+  );
+  const normalizedPdfLineSpacing = normalizeLineSpacing(pdfLineSpacing);
+  const useGrayscale = pdfColorScheme === "grayscale";
+  const effectiveCodeTheme = useGrayscale ? "monochrome" : codeTheme;
+  const latexLinkColorArgs = useGrayscale ? [
+    "-V",
+    "colorlinks=true",
+    "-V",
+    "linkcolor=black",
+    "-V",
+    "urlcolor=black",
+    "-V",
+    "citecolor=black"
+  ] : ["-V", "colorlinks=true"];
   const args = [
     inputPath,
     "-o",
@@ -2308,7 +2346,7 @@ function buildPandocArgs(options) {
     // auto-TOC placement always comes before the document body, which would
     // put the TOC before the title. For other engines keep auto-TOC.
     ...format === "pdf" && ["xelatex", "lualatex", "pdflatex"].includes(engine) ? [] : ["--toc", "--toc-depth=3"],
-    `--highlight-style=${codeTheme}`,
+    `--highlight-style=${effectiveCodeTheme}`,
     "--resource-path",
     path5.dirname(inputPath)
   ];
@@ -2318,7 +2356,9 @@ function buildPandocArgs(options) {
     "-V",
     `fontsize=${fontSize}pt`,
     "-V",
-    `papersize=${pageSize.toLowerCase()}`
+    `papersize=${pageSize.toLowerCase()}`,
+    "-V",
+    `linestretch=${normalizedPdfLineSpacing}`
   ];
   if (format === "pdf") switch (engine) {
     case "xelatex":
@@ -2330,8 +2370,7 @@ function buildPandocArgs(options) {
         listingsHeaderPath,
         ...latexBase,
         ...getCjkArgs(engine, enableCjk, cjkFont),
-        "-V",
-        "colorlinks=true"
+        ...latexLinkColorArgs
       );
       break;
     case "pdflatex":
@@ -2342,8 +2381,7 @@ function buildPandocArgs(options) {
         "-H",
         listingsHeaderPath,
         ...latexBase,
-        "-V",
-        "colorlinks=true"
+        ...latexLinkColorArgs
       );
       break;
     case "lualatex":
@@ -2355,8 +2393,7 @@ function buildPandocArgs(options) {
         listingsHeaderPath,
         ...latexBase,
         ...getCjkArgs(engine, enableCjk, cjkFont),
-        "-V",
-        "colorlinks=true"
+        ...latexLinkColorArgs
       );
       break;
     case "wkhtmltopdf":
@@ -2381,18 +2418,33 @@ function buildPandocArgs(options) {
         "-V",
         `font-size=${fontSize}pt`,
         "-V",
-        `page-size=${pageSize.toLowerCase()}`
+        `page-size=${pageSize.toLowerCase()}`,
+        "-V",
+        `linestretch=${normalizedPdfLineSpacing}`
       );
+      if (useGrayscale) {
+        args.push(
+          "-V",
+          "linkcolor=black",
+          "-V",
+          "citecolor=black",
+          "-V",
+          "filecolor=black"
+        );
+      }
       break;
   }
   if (format === "docx" && options.docxReferencePath) {
     args.push(`--reference-doc=${options.docxReferencePath}`);
   }
-  if (format === "docx" && options.docxTocTitle) {
-    args.push("--metadata", `toc-title=${options.docxTocTitle}`);
+  if (options.tocTitle) {
+    args.push("--metadata", `toc-title=${options.tocTitle}`);
   }
   if ((engine === "wkhtmltopdf" || engine === "weasyprint") && customCssPath) {
     args.push("--css", customCssPath);
+  }
+  if (format === "pdf" && (engine === "wkhtmltopdf" || engine === "weasyprint")) {
+    args.push("--css", pdfThemeCssPath);
   }
   if (customTemplatePath && format !== "docx") {
     args.push("--template", customTemplatePath);
@@ -2406,10 +2458,10 @@ function buildPandocArgs(options) {
   if (options.docDate) {
     args.push("--metadata", `date=${options.docDate}`);
   }
-  if (engine === "typst" && options.figureLabel) {
+  if (engine === "typst" && options.tocTitle) {
     args.push(
       "--metadata",
-      `lang=${options.figureLabel === "\u56FE" ? "zh" : "en"}`
+      `lang=${options.tocTitle === "\u76EE\u5F55" ? "zh" : "en"}`
     );
   }
   if (extraArgs.length > 0) {
@@ -2458,9 +2510,17 @@ async function exportWithPandoc(options) {
     options.headingFont,
     options.enableCjk,
     options.fontSize,
+    options.pdfColorScheme,
     options.figureLabel
   );
   writeCalloutFilter(options.tempDir);
+  if (options.format === "pdf") {
+    writePdfThemeCss(
+      options.tempDir,
+      options.pdfLineSpacing,
+      options.pdfColorScheme
+    );
+  }
   let resolvedOptions = options;
   if (options.format === "docx" && (options.docxBodyFont.trim() || options.docxHeadingFont.trim() || options.docxLineSpacing !== 1)) {
     try {
@@ -2534,6 +2594,69 @@ async function exportWithPandoc(options) {
       });
     });
   });
+}
+function writePdfThemeCss(tempDir, multiplier, colorScheme) {
+  const spacing = normalizeLineSpacing(multiplier);
+  const cssPath = path5.join(tempDir, "obsidian-press-pdf-theme.css");
+  const grayscaleCss = colorScheme === "grayscale" ? String.raw`
+:root {
+  --text-color: #1f2224;
+  --border-color: #c9ccce;
+  --accent-color: #454a4f;
+  --code-bg: #f2f3f3;
+}
+a, a:visited { color: #33373a !important; }
+h1 { border-color: #454a4f !important; }
+h2 { border-color: #b7bbbe !important; }
+blockquote {
+  border-color: #666b6f !important;
+  background: #f3f3f2 !important;
+  color: #404447 !important;
+}
+mark { background: #dfe1e2 !important; color: #202224 !important; }
+pre, code, .sourceCode {
+  background: #f2f3f3 !important;
+  border-color: #c9ccce !important;
+}
+.sourceCode span { color: #25282a !important; }
+.callout {
+  border-color: #6c7175 !important;
+  background: #f1f2f2 !important;
+  color: #363a3d !important;
+}
+.callout-title { color: #3f4448 !important; }
+.callout-summary {
+  border-color: #555a5f !important;
+  background: #f0f1f1 !important;
+  color: #383c40 !important;
+}
+.callout-summary .callout-title {
+  border-color: #9ea2a5 !important;
+  background: #d9dcde !important;
+  color: #383c40 !important;
+}
+.callout-summary .callout-body strong { color: #454a4f !important; }
+.callout-important, .callout-example,
+.callout-warning, .callout-question {
+  border-color: #595e63 !important;
+  background: #edeeee !important;
+}
+.callout-caution, .callout-failure,
+.callout-danger, .callout-bug {
+  border-color: #484d51 !important;
+  background: #e9ebec !important;
+}
+` : "";
+  fs4.writeFileSync(
+    cssPath,
+    `body { line-height: ${spacing} !important; }
+${grayscaleCss}`,
+    "utf8"
+  );
+}
+function normalizeLineSpacing(multiplier) {
+  if (!Number.isFinite(multiplier)) return 1.5;
+  return Math.min(3, Math.max(1, multiplier));
 }
 async function writeDocxReference(options) {
   const bodyFont = options.docxBodyFont.trim();
@@ -2709,14 +2832,36 @@ end
 `;
   fs4.writeFileSync(filterPath, filter, "utf8");
 }
-function writeListingsHeader(tempDir, engine, headingFont, enableCjk, fontSize, figureLabel) {
-  const headerPath = path5.join(tempDir, "obsidian-press-listings.tex");
-  const coverContent = String.raw`\usepackage{xcolor}
-\usepackage{tikz}
-\usepackage{needspace}
-\usepackage[most]{tcolorbox}
-\usetikzlibrary{calc}
-\definecolor{CoverPaper}{HTML}{F7F8FC}
+function getLatexThemeColors(colorScheme) {
+  if (colorScheme === "grayscale") {
+    return String.raw`\definecolor{CoverPaper}{HTML}{F6F6F4}
+\definecolor{CoverBlue}{HTML}{44484C}
+\definecolor{CoverPlum}{HTML}{62666A}
+\definecolor{CoverRed}{HTML}{4E5154}
+\definecolor{CoverLine}{HTML}{C8CBCC}
+\definecolor{CoverInk}{HTML}{171819}
+\definecolor{CoverMuted}{HTML}{707477}
+\definecolor{HeadingBlue}{HTML}{41464B}
+\definecolor{HeadingTint}{HTML}{EDEEEF}
+\pressdefinecalloutpalette{note}{7A7F84}{E2E4E5}{F3F4F4}{44494E}{3B3E41}
+\pressdefinecalloutpalette{summary}{555A5F}{D9DCDE}{F0F1F1}{454A4F}{383C40}
+\pressdefinecalloutpalette{tip}{777C80}{E1E3E4}{F4F4F3}{494E52}{3C4043}
+\pressdefinecalloutpalette{important}{5E6368}{DADCDD}{EFEFF0}{3E4347}{383C40}
+\pressdefinecalloutpalette{warning}{666B70}{DCDEDF}{F1F1F0}{41464A}{3A3E41}
+\pressdefinecalloutpalette{caution}{50555A}{D5D8DA}{EDEEEF}{353A3E}{35393C}
+\pressdefinecalloutpalette{abstract}{73787D}{E0E2E3}{F2F3F3}{454A4E}{3A3E42}
+\pressdefinecalloutpalette{info}{7A7F84}{E2E4E5}{F3F4F4}{44494E}{3B3E41}
+\pressdefinecalloutpalette{todo}{7A7F84}{E2E4E5}{F3F4F4}{44494E}{3B3E41}
+\pressdefinecalloutpalette{example}{5E6368}{DADCDD}{EFEFF0}{3E4347}{383C40}
+\pressdefinecalloutpalette{quote}{8A8E91}{E7E8E8}{FAFAFA}{555A5E}{444648}
+\pressdefinecalloutpalette{success}{72777B}{E0E2E3}{F3F4F3}{454A4E}{3B3F42}
+\pressdefinecalloutpalette{question}{666B70}{DCDEDF}{F1F1F0}{41464A}{3A3E41}
+\pressdefinecalloutpalette{failure}{50555A}{D5D8DA}{EDEEEF}{353A3E}{35393C}
+\pressdefinecalloutpalette{danger}{484D51}{D2D5D7}{E9EBEC}{303539}{323638}
+\pressdefinecalloutpalette{bug}{50555A}{D5D8DA}{EDEEEF}{353A3E}{35393C}
+\definecolor{CalloutDash}{HTML}{9EA2A5}`;
+  }
+  return String.raw`\definecolor{CoverPaper}{HTML}{F7F8FC}
 \definecolor{CoverBlue}{HTML}{3D6694}
 \definecolor{CoverPlum}{HTML}{6C5874}
 \definecolor{CoverRed}{HTML}{D84A4A}
@@ -2725,13 +2870,6 @@ function writeListingsHeader(tempDir, engine, headingFont, enableCjk, fontSize, 
 \definecolor{CoverMuted}{HTML}{747982}
 \definecolor{HeadingBlue}{HTML}{2F67A0}
 \definecolor{HeadingTint}{HTML}{EDF3F9}
-\newcommand{\pressdefinecalloutpalette}[6]{%
-  \definecolor{CalloutFrame#1}{HTML}{#2}%
-  \definecolor{CalloutTitle#1}{HTML}{#3}%
-  \definecolor{CalloutBody#1}{HTML}{#4}%
-  \definecolor{CalloutAccent#1}{HTML}{#5}%
-  \definecolor{CalloutInk#1}{HTML}{#6}%
-}
 \pressdefinecalloutpalette{note}{448AFF}{DCE8FC}{E8F0FE}{1A73E8}{3F4650}
 \pressdefinecalloutpalette{summary}{58547D}{DDDBD5}{F2E7DB}{C16D88}{55527C}
 \pressdefinecalloutpalette{tip}{00BFA5}{C9F0EA}{E0F7FA}{00897B}{344B4A}
@@ -2748,7 +2886,24 @@ function writeListingsHeader(tempDir, engine, headingFont, enableCjk, fontSize, 
 \pressdefinecalloutpalette{failure}{FF1744}{F7CCD6}{FCE4EC}{C62828}{584047}
 \pressdefinecalloutpalette{danger}{D50000}{F7C9C9}{FFEBEE}{B71C1C}{594040}
 \pressdefinecalloutpalette{bug}{F44336}{F5D0C8}{FBE9E7}{BF360C}{59423E}
-\definecolor{CalloutDash}{HTML}{9EAAB2}
+\definecolor{CalloutDash}{HTML}{9EAAB2}`;
+}
+function writeListingsHeader(tempDir, engine, headingFont, enableCjk, fontSize, pdfColorScheme, figureLabel) {
+  const headerPath = path5.join(tempDir, "obsidian-press-listings.tex");
+  const themeColors = getLatexThemeColors(pdfColorScheme);
+  const coverContent = String.raw`\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{needspace}
+\usepackage[most]{tcolorbox}
+\usetikzlibrary{calc}
+\newcommand{\pressdefinecalloutpalette}[6]{%
+  \definecolor{CalloutFrame#1}{HTML}{#2}%
+  \definecolor{CalloutTitle#1}{HTML}{#3}%
+  \definecolor{CalloutBody#1}{HTML}{#4}%
+  \definecolor{CalloutAccent#1}{HTML}{#5}%
+  \definecolor{CalloutInk#1}{HTML}{#6}%
+}
+${themeColors}
 \providecommand{\coverheadingfont}{\sffamily}
 \newcommand{\presscalloutbold}[1]{{\color{CalloutAccent\presscallouttype}\bfseries #1}}
 \newcommand{\pressclipboardicon}{%
@@ -3004,6 +3159,7 @@ function buildLatexCoverPage(metadata) {
     "\\end{tikzpicture}",
     "\\null",
     "\\end{titlepage}",
+    `\\renewcommand{\\contentsname}{${escapeLatexText(metadata.tocTitle)}}`,
     "\\tableofcontents",
     "\\clearpage",
     "```"
@@ -3044,6 +3200,22 @@ function escapeLatexText(value) {
   return value.replace(/\\/g, "\\textbackslash{}").replace(/[&%$#_{}~^]/g, (character) => `\\${character}`);
 }
 
+// src/language.ts
+function detectTocTitle(content) {
+  var _a2, _b2, _c, _d;
+  const mainContent = content.replace(/^\uFEFF?---[ \t]*\r?\n[\s\S]*?^---[ \t]*\r?$/m, "").replace(/^(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1[ \t]*$/gm, "").replace(/`[^`\n]*`/g, "").replace(/\$\$[\s\S]*?\$\$/g, "").replace(/\$[^$\n]*\$/g, "").replace(/%%[\s\S]*?%%/g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/!\[\[[^\]]+\]\]/g, "").replace(/!?\[([^\]]*)\]\([^)]+\)/g, "$1").replace(
+    /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+    (_match, target, alias) => alias || target
+  ).replace(/https?:\/\/\S+/gi, "").replace(/<[^>]+>/g, "");
+  const cjkCount = (_b2 = (_a2 = mainContent.match(
+    /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/gu
+  )) == null ? void 0 : _a2.length) != null ? _b2 : 0;
+  const latinCount = (_d = (_c = mainContent.match(/[A-Za-z]/g)) == null ? void 0 : _c.length) != null ? _d : 0;
+  if (cjkCount === 0) return "Contents";
+  if (latinCount === 0) return "\u76EE\u5F55";
+  return cjkCount * 2 >= latinCount ? "\u76EE\u5F55" : "Contents";
+}
+
 // src/exporter.ts
 var DOCX_BODY_PAGE_BREAK = `\`\`\`{=openxml}
 <w:p><w:r><w:br w:type="page"/></w:r></w:p>
@@ -3054,6 +3226,7 @@ async function exportFile(file, app, settings) {
   const tmpDir = getTmpDir(app);
   try {
     const content = await app.vault.read(file);
+    const tocTitle = detectTocTitle(content);
     const effectivePdfEngine = settings.defaultFormat === "pdf" && settings.pdfEngine === "pdflatex" && containsCjk(content) ? "xelatex" : settings.pdfEngine;
     const format = settings.defaultFormat;
     const outputPath = getOutputPath(
@@ -3114,7 +3287,8 @@ async function exportFile(file, app, settings) {
         author: docAuthor,
         institution: rendered.institution,
         version: rendered.version,
-        date: modifiedDate
+        date: modifiedDate,
+        tocTitle
       }) + "\n\n" + rendered.content;
     }
     if (settings.defaultFormat === "docx") {
@@ -3133,6 +3307,8 @@ async function exportFile(file, app, settings) {
       pandocPath: settings.pandocPath,
       tempDir: tmpDir,
       fontSize: settings.fontSize,
+      pdfLineSpacing: settings.pdfLineSpacing,
+      pdfColorScheme: settings.pdfColorScheme,
       pageSize: settings.pageSize,
       pageMargin: settings.pageMargin,
       codeTheme: settings.codeTheme,
@@ -3142,7 +3318,7 @@ async function exportFile(file, app, settings) {
       docxBodyFont: settings.docxBodyFont,
       docxHeadingFont: settings.docxHeadingFont,
       docxLineSpacing: settings.docxLineSpacing,
-      docxTocTitle: settings.defaultFormat === "docx" ? containsCjk(content) ? "\u76EE\u5F55" : "Contents" : void 0,
+      tocTitle,
       customCssPath: settings.customCssPath || void 0,
       customTemplatePath: settings.customTemplatePath || void 0,
       extraArgs: settings.extraArgs ? settings.extraArgs.split(/\s+/).filter(Boolean) : [],

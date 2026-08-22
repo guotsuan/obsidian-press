@@ -6,7 +6,7 @@ Press PDF Export converts Obsidian Markdown into Pandoc-compatible Markdown, the
 
 ## Status
 
-- Version: `1.4.0`
+- Version: `1.5.0`
 - License: MIT
 - Obsidian: desktop app only
 - Minimum Obsidian version: `1.8.7`
@@ -231,6 +231,8 @@ Access via **Command Palette** (`Cmd/Ctrl + P`) or the ribbon icon (file output 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Font size | 11pt | Base font size |
+| PDF line spacing | `1.5` | Line spacing multiplier for LaTeX, Typst, wkhtmltopdf, and WeasyPrint PDF exports |
+| PDF color scheme | Current color | PDF-only theme. Choose Formal grayscale for neutral headings, callouts, links, and code highlighting; inserted images retain their original colors |
 | Page size | A4 | A4, Letter, Legal, A3 |
 | Page margin | 25mm | Page margin |
 | Code theme | Tango | Syntax highlight theme. Tango is the default because it gives PDF code blocks a visible background |
@@ -241,10 +243,11 @@ Access via **Command Palette** (`Cmd/Ctrl + P`) or the ribbon icon (file output 
 | DOCX heading font | `Hiragino Sans GB` | Font used by titles and heading levels in Word exports |
 | DOCX line spacing | `1.5` | Line spacing multiplier written into the default Word paragraph style |
 
-DOCX exports place the document title before the table of contents. The table
-of contents is titled `目录` when the note contains CJK text and `Contents`
-otherwise. The document body always starts on a new page after the table of
-contents.
+PDF and DOCX exports choose the table-of-contents title from the main prose:
+Chinese-led documents use `目录`, while English-led documents use `Contents`.
+Frontmatter, code blocks, equations, comments, and link targets are excluded
+from this language decision. DOCX body content starts on a new page after the
+table of contents.
 
 ### Advanced
 

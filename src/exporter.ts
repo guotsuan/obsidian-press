@@ -6,6 +6,7 @@ import { PluginSettings, ExportResult, BatchResult, PandocOptions } from "./type
 import { renderToPandoc } from "./renderer";
 import { exportWithPandoc, checkPandocAvailable } from "./pandoc";
 import { buildLatexCoverPage, formatIsoDate } from "./cover";
+import { detectTocTitle } from "./language";
 import {
   getVaultPath,
   getOutputPath,
@@ -31,6 +32,7 @@ export async function exportFile(
   try {
     // Read file content
     const content = await app.vault.read(file);
+    const tocTitle = detectTocTitle(content);
     const effectivePdfEngine =
       settings.defaultFormat === "pdf" &&
       settings.pdfEngine === "pdflatex" &&
@@ -116,6 +118,7 @@ export async function exportFile(
           institution: rendered.institution,
           version: rendered.version,
           date: modifiedDate,
+          tocTitle,
         }) +
         "\n\n" +
         rendered.content;
@@ -143,6 +146,8 @@ export async function exportFile(
       pandocPath: settings.pandocPath,
       tempDir: tmpDir,
       fontSize: settings.fontSize,
+      pdfLineSpacing: settings.pdfLineSpacing,
+      pdfColorScheme: settings.pdfColorScheme,
       pageSize: settings.pageSize,
       pageMargin: settings.pageMargin,
       codeTheme: settings.codeTheme,
@@ -152,12 +157,7 @@ export async function exportFile(
       docxBodyFont: settings.docxBodyFont,
       docxHeadingFont: settings.docxHeadingFont,
       docxLineSpacing: settings.docxLineSpacing,
-      docxTocTitle:
-        settings.defaultFormat === "docx"
-          ? containsCjk(content)
-            ? "目录"
-            : "Contents"
-          : undefined,
+      tocTitle,
       customCssPath: settings.customCssPath || undefined,
       customTemplatePath: settings.customTemplatePath || undefined,
       extraArgs: settings.extraArgs

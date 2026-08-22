@@ -4,6 +4,13 @@ All notable changes to Press PDF Export are documented here.
 
 This project follows semantic versioning where practical.
 
+## 1.5.0 - 2026-08-22
+
+- Added configurable PDF line spacing with a 1.5× default across LaTeX, Typst, wkhtmltopdf, and WeasyPrint engines.
+- Added a PDF-only formal grayscale color scheme for covers, headings, callouts, links, and code highlighting while preserving inserted image colors.
+- Localized PDF, DOCX, HTML, and Typst table-of-contents titles from the document's primary prose language, excluding metadata, code, equations, comments, and link targets from detection.
+- Fixed explicit H2 number extraction for headings such as `## 1.2 Title`, while retaining support for trailing periods, Chinese periods, and enumeration commas.
+
 ## 1.4.0 - 2026-08-11
 
 - Added native, type-specific PDF callouts for note, summary, tip, important, warning, caution, abstract, info, todo, example, quote, success, question, failure, danger, and bug, including common Obsidian aliases.

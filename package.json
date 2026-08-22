@@ -1,6 +1,6 @@
 {
   "name": "press-pdf-export",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "High-fidelity PDF export plugin for Obsidian, powered by Pandoc",
   "main": "main.js",
   "scripts": {

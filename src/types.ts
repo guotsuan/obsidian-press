@@ -11,6 +11,7 @@ export type PdfEngine =
 export type OutputFormat = "pdf" | "docx" | "html";
 export type OutputNaming = "same" | "timestamp" | "suffix";
 export type PageSize = "A4" | "Letter" | "Legal" | "A3";
+export type PdfColorScheme = "color" | "grayscale";
 export type CodeTheme =
   | "tango"
   | "zenburn"
@@ -36,6 +37,8 @@ export interface PluginSettings {
   customCssPath: string;
   customTemplatePath: string;
   fontSize: number;
+  pdfLineSpacing: number;
+  pdfColorScheme: PdfColorScheme;
   pageSize: PageSize;
   pageMargin: string;
   codeTheme: CodeTheme;
@@ -78,6 +81,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   customCssPath: "",
   customTemplatePath: "",
   fontSize: 11,
+  pdfLineSpacing: 1.5,
+  pdfColorScheme: "color",
   pageSize: "A4",
   pageMargin: "25",
   codeTheme: "tango",
@@ -112,6 +117,8 @@ export interface PandocOptions {
   pandocPath: string;
   tempDir: string;
   fontSize: number;
+  pdfLineSpacing: number;
+  pdfColorScheme: PdfColorScheme;
   pageSize: string;
   pageMargin: string;
   codeTheme: string;
@@ -122,7 +129,7 @@ export interface PandocOptions {
   docxHeadingFont: string;
   docxLineSpacing: number;
   docxReferencePath?: string;
-  docxTocTitle?: string;
+  tocTitle?: "目录" | "Contents";
   customCssPath?: string;
   customTemplatePath?: string;
   extraArgs: string[];
